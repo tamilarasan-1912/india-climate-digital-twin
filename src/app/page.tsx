@@ -1,69 +1,198 @@
-import Image from "next/image";
+"use client";
+
+import { useState } from "react";
+
+const layers = [
+  "Temperature",
+  "Rainfall",
+  "Wind",
+  "Humidity",
+  "Land Surface Temperature",
+];
+
+const bottomTabs = [
+  "Forecast",
+  "Extreme Events",
+  "Scenarios",
+  "Models",
+  "Validation",
+];
 
 export default function Home() {
+  const [activeLayer, setActiveLayer] = useState("Temperature");
+  const [activeTab, setActiveTab] = useState("Forecast");
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert h-5 w-[100px]"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the{" "}
-            <code className="rounded bg-black/[.06] px-1.5 py-0.5 font-mono text-[0.9em] dark:bg-white/[.08]">
-              page.tsx
-            </code>{" "}
-            file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+    <main className="app-shell">
+      {/* TOP BAR */}
+      <header className="topbar">
+        <div>
+          <div className="brand">
+            <span className="brand-icon">🇮🇳</span>
+            INDIA CLIMATE DIGITAL TWIN
+          </div>
+
+          <div className="subtitle">
+            AI • EARTH OBSERVATION • CLIMATE INTELLIGENCE
+          </div>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert h-[14px] w-4"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={14}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+
+        <div className="system-status">
+          <span className="status-dot"></span>
+          SYSTEM ONLINE
         </div>
-      </main>
-    </div>
+      </header>
+
+      {/* MAIN CONTENT */}
+      <section className="workspace">
+        {/* LEFT PANEL */}
+        <aside className="left-panel">
+          <div className="panel-title">LAYERS</div>
+
+          <div className="layer-list">
+            {layers.map((layer) => (
+              <button
+                key={layer}
+                className={`layer-item ${
+                  activeLayer === layer ? "active" : ""
+                }`}
+                onClick={() => setActiveLayer(layer)}
+              >
+                <span className="layer-indicator">
+                  {activeLayer === layer ? "●" : "○"}
+                </span>
+
+                <span>{layer}</span>
+              </button>
+            ))}
+          </div>
+
+          <div className="panel-divider"></div>
+
+          <div className="panel-title">MAP MODE</div>
+
+          <button className="mode-button active-mode">2D MAP</button>
+          <button className="mode-button">3D GLOBE</button>
+        </aside>
+
+        {/* MAP */}
+        <section className="map-container">
+          <div className="map-header">
+            <span>INDIA</span>
+            <span className="map-layer-label">
+              ACTIVE LAYER: {activeLayer.toUpperCase()}
+            </span>
+          </div>
+
+          <div className="map-area">
+            <div className="india-placeholder">
+              <div className="india-symbol">🇮🇳</div>
+
+              <div className="map-message">
+                <strong>INDIA CLIMATE MAP</strong>
+                <span>MapLibre visualization will be connected here.</span>
+              </div>
+            </div>
+
+            <div className="map-controls">
+              <button>+</button>
+              <button>−</button>
+              <button>⌖</button>
+            </div>
+
+            <div className="map-scale">
+              0 ───────── 500 km
+            </div>
+          </div>
+        </section>
+
+        {/* RIGHT PANEL */}
+        <aside className="right-panel">
+          <div className="panel-title">CLIMATE STATE</div>
+
+          <div className="state-location">
+            INDIA • CURRENT STATE
+          </div>
+
+          <div className="metric-card">
+            <div className="metric-label">TEMPERATURE</div>
+            <div className="metric-value">28.4°C</div>
+            <div className="metric-description">
+              National reference value
+            </div>
+          </div>
+
+          <div className="metric-card">
+            <div className="metric-label">RAINFALL</div>
+            <div className="metric-value">12.4 mm</div>
+            <div className="metric-description">
+              Latest observation
+            </div>
+          </div>
+
+          <div className="metric-card">
+            <div className="metric-label">HUMIDITY</div>
+            <div className="metric-value">71%</div>
+            <div className="metric-description">
+              Atmospheric humidity
+            </div>
+          </div>
+
+          <div className="panel-divider"></div>
+
+          <div className="panel-title">DATA SOURCE</div>
+
+          <div className="data-source">
+            <span>●</span>
+            Demonstration Data
+          </div>
+
+          <div className="source-warning">
+            Live scientific datasets will be connected in later phases.
+          </div>
+        </aside>
+      </section>
+
+      {/* TIMELINE */}
+      <section className="timeline-panel">
+        <div className="timeline-header">
+          <span>TIME</span>
+          <span>20 AUG 2026 • 21:00 IST</span>
+        </div>
+
+        <div className="timeline">
+          <div className="timeline-line"></div>
+
+          <div className="timeline-point active-point"></div>
+
+          <div className="timeline-labels">
+            <span>2020</span>
+            <span>2022</span>
+            <span>2024</span>
+            <span>2026</span>
+            <span>2030</span>
+          </div>
+        </div>
+      </section>
+
+      {/* BOTTOM TABS */}
+      <nav className="bottom-tabs">
+        {bottomTabs.map((tab) => (
+          <button
+            key={tab}
+            className={activeTab === tab ? "tab active-tab" : "tab"}
+            onClick={() => setActiveTab(tab)}
+          >
+            {tab}
+          </button>
+        ))}
+      </nav>
+
+      {/* FOOTER */}
+      <footer className="footer">
+        <span>INDIA CLIMATE DIGITAL TWIN</span>
+        <span>Prototype • Scientific Visualization Platform</span>
+      </footer>
+    </main>
   );
 }
