@@ -1,6 +1,10 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
+from backend.config.climate_config import (
+    CLIMATE_VARIABLES,
+)
+
 from backend.services.rainfall_service import (
     get_dataset_info,
     get_daily_statistics,
@@ -10,6 +14,16 @@ from backend.services.rainfall_service import (
     get_rainfall_grid_info,
 )
 
+from backend.services.extreme_event_service import (
+    detect_extreme_rainfall,
+    get_extreme_rainfall_geojson,
+    get_extreme_event_summary,
+)
+
+from backend.services.climate_risk_service import (
+    get_climate_risk_summary,
+    get_climate_risk_grid,
+)
 
 # ============================================================
 # APPLICATION
@@ -239,5 +253,173 @@ def rainfall_grid_info(
         raise HTTPException(
             status_code=400,
 
+            detail=str(error),
+        )
+        # ============================================================
+# CLIMATE VARIABLES
+# ============================================================
+
+@app.get("/api/climate/variables")
+def climate_variables():
+
+    return {
+        "variables": CLIMATE_VARIABLES
+    }
+# ============================================================
+# EXTREME RAINFALL EVENTS
+# ============================================================
+
+@app.get(
+    "/api/extreme-events/rainfall/{date}"
+)
+def extreme_rainfall_events(
+    date: str
+):
+
+    try:
+
+        return detect_extreme_rainfall(
+            date
+        )
+
+    except ValueError as error:
+
+        raise HTTPException(
+            status_code=400,
+            detail=str(error),
+        )
+
+    except Exception as error:
+
+        raise HTTPException(
+            status_code=500,
+            detail=str(error),
+        )
+
+
+# ============================================================
+# EXTREME RAINFALL SUMMARY
+# ============================================================
+
+@app.get(
+    "/api/extreme-events/summary/{date}"
+)
+def extreme_rainfall_summary(
+    date: str
+):
+
+    try:
+
+        return get_extreme_event_summary(
+            date
+        )
+
+    except ValueError as error:
+
+        raise HTTPException(
+            status_code=400,
+            detail=str(error),
+        )
+
+    except Exception as error:
+
+        raise HTTPException(
+            status_code=500,
+            detail=str(error),
+        )
+
+
+# ============================================================
+# EXTREME RAINFALL GEOJSON
+# ============================================================
+
+@app.get(
+    "/api/extreme-events/rainfall/geojson/{date}"
+)
+def extreme_rainfall_geojson(
+    date: str
+):
+
+    try:
+
+        return get_extreme_rainfall_geojson(
+            date
+        )
+
+    except ValueError as error:
+
+        raise HTTPException(
+            status_code=400,
+            detail=str(error),
+        )
+
+    except Exception as error:
+
+        raise HTTPException(
+            status_code=500,
+            detail=str(error),
+        )
+
+
+# ============================================================
+# CLIMATE RISK SUMMARY
+# ============================================================
+
+@app.get(
+    "/api/risk/summary/{date}"
+)
+def climate_risk_summary(
+    date: str
+):
+
+    try:
+
+        return get_climate_risk_summary(
+            date
+        )
+
+    except ValueError as error:
+
+        raise HTTPException(
+            status_code=400,
+            detail=str(error),
+        )
+
+    except Exception as error:
+
+        raise HTTPException(
+            status_code=500,
+            detail=str(error),
+        )
+
+
+# ============================================================
+# CLIMATE RISK GRID
+# ============================================================
+
+@app.get(
+    "/api/risk/grid/{date}"
+)
+def climate_risk_grid(
+    date: str
+):
+
+    try:
+
+        return get_climate_risk_grid(
+            date
+        )
+
+    except ValueError as error:
+
+        raise HTTPException(
+            status_code=400,
+            detail=str(error),
+        )
+
+    except Exception as error:
+
+        raise HTTPException(
+            status_code=500,
             detail=str(error),
         )
