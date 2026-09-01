@@ -1,0 +1,44 @@
+{
+  "model_id": "ibm-nasa-geospatial/Prithvi-WxC-1.0-2300M-rollout",
+  "architecture": "prithvi.wxc.rollout.2300m.v1",
+  "provider": "IBM / NASA",
+  "purpose": "autoregressive weather forecasting",
+  "input_channels": 160,
+  "input_size_time": 2,
+  "static_input_channels": 8,
+  "grid": {
+    "latitude_pixels": 360,
+    "longitude_pixels": 576,
+    "patch_size_pixels": [2, 2],
+    "mask_unit_size_pixels": [30, 32]
+  },
+  "architecture": {
+    "embed_dim": 2560,
+    "encoder_blocks": 12,
+    "decoder_blocks": 2,
+    "mlp_multiplier": 4,
+    "attention_heads": 16,
+    "dropout": 0.0,
+    "drop_path": 0.0,
+    "parameter_dropout": 0.0
+  },
+  "rollout_contract": {
+    "input_delta_hours": 6,
+    "forecast_lead_hours": 6
+  },
+  "normalization": {
+    "status": "official_statistics_required",
+    "source": "Prithvi-WxC climatology / model preprocessing",
+    "do_not_invent_statistics": true
+  },
+  "checkpoint": {
+    "repository": "ibm-nasa-geospatial/Prithvi-WxC-1.0-2300M-rollout",
+    "download_into_git": false,
+    "download_into_codespace_by_default": false
+  },
+  "implementation": {
+    "preferred_library": "TerraTorch",
+    "official_reference_repository": "NASA-IMPACT/Prithvi-WxC",
+    "status": "contract_locked_before_inference"
+  }
+}
