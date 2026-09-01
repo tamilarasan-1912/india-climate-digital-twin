@@ -33,11 +33,16 @@ from backend.services.digital_twin_service import (
     get_provenance,
     get_system_health,
 )
+from backend.services.prithvi_wxc_service import (
+    get_prithvi_wxc_status,
+    validate_prithvi_inputs,
+    run_local_inference,
+)
 
 app = FastAPI(
     title="India Climate Digital Twin API",
     description="Operational scientific API for the India Climate Digital Twin.",
-    version="0.4.0",
+    version="0.5.0",
 )
 
 app.add_middleware(
@@ -56,6 +61,8 @@ def _call(function, *args, **kwargs):
         raise HTTPException(status_code=400, detail=str(error)) from error
     except FileNotFoundError as error:
         raise HTTPException(status_code=503, detail=str(error)) from error
+    except RuntimeError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
     except Exception as error:
         raise HTTPException(status_code=500, detail=str(error)) from error
 
@@ -66,7 +73,7 @@ def root():
         "project": "India Climate Digital Twin",
         "status": "online",
         "engine": "Python + FastAPI",
-        "version": "0.4.0",
+        "version": "0.5.0",
     }
 
 
@@ -175,6 +182,23 @@ def forecast_baseline(
 @app.get("/api/models")
 def models():
     return _call(get_model_catalog)
+
+
+# -------------------- PRITHVI WxC --------------------
+
+@app.get("/api/ai/prithvi/status")
+def prithvi_status():
+    return _call(get_prithvi_wxc_status)
+
+
+@app.get("/api/ai/prithvi/validate")
+def prithvi_validate():
+    return _call(validate_prithvi_inputs)
+
+
+@app.post("/api/ai/prithvi/load")
+def prithvi_load():
+    return _call(run_local_inference)
 
 
 # -------------------- EXPLAINABILITY --------------------
