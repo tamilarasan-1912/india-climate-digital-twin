@@ -1,0 +1,10 @@
+# Optional AI runtime. Keep separate from backend/requirements.txt so CI and the
+# lightweight FastAPI service do not download multi-GB ML dependencies.
+#
+# Install in a GPU environment (Colab/Codespaces GPU/hosted GPU) when running
+# the Prithvi WxC checkpoint.
+terratorch
+huggingface_hub
+safetensors
+# Install a CUDA-compatible PyTorch build from https://pytorch.org/get-started/locally/
+# before installing/running TerraTorch.
