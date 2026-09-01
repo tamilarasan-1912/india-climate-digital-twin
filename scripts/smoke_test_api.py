@@ -22,6 +22,8 @@ ENDPOINTS = [
     "/api/models",
     "/api/validation",
     "/api/provenance",
+    "/api/ai/prithvi/status",
+    "/api/ai/prithvi/validate",
     "/api/explain/rainfall?rainfall_mm=100",
     "/api/scenarios/simulate?base_date=2024-07-15&precipitation_delta_pct=20",
     "/api/risk/summary/2024-07-15",
