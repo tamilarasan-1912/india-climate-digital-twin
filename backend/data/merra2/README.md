@@ -1,17 +1,25 @@
-# MERRA-2 input directory
+# MERRA-2 input staging
 
-Place validated MERRA-2 NetCDF files here. Do **not** commit large raw files to
-normal Git history.
+Place authenticated MERRA-2 NetCDF downloads in this directory. Raw files are intentionally not committed to normal Git history.
 
-The Prithvi WxC rollout model expects two timestamps and 160 atmospheric
-variables on the MERRA-2-compatible grid. The validator in
-`backend/services/merra2_input_validator.py` performs structural checks before
-any model inference is attempted.
+The Prithvi WxC rollout model expects two timestamps and 160 atmospheric variables on the MERRA-2-compatible grid. The validator performs structural checks before inference.
 
-Recommended workflow:
+## Preparation
 
-1. Obtain the required MERRA-2 fields from the official NASA/GES DISC source.
-2. Store the files locally in this directory.
-3. Run `python backend/services/merra2_input_validator.py`.
-4. Check `/api/ai/prithvi/status`.
-5. Only after the input contract passes, run the optional AI environment.
+Run:
+
+```bash
+python scripts/prepare_merra2_prithvi_input.py
+```
+
+or:
+
+```bash
+python scripts/prepare_merra2_prithvi_input.py --input backend/data/merra2/<file>.nc
+```
+
+The preparation step discovers a real local MERRA-2 NetCDF, verifies time/latitude/longitude coordinates, requires at least two timestamps and 160 atmospheric fields, crops to the Chennai bounding box when possible, checks selected fields for NaNs, and writes a traceable prepared NetCDF plus JSON manifest.
+
+It never creates synthetic missing atmospheric variables. A file with fewer than 160 variables is correctly reported as **not ready** rather than padded with fabricated data.
+
+The final Prithvi-WxC adapter must still enforce the model's exact variable ordering, units, normalization and tensor layout before inference.
