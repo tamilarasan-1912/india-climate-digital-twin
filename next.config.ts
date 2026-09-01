@@ -13,6 +13,7 @@ const nextConfig: NextConfig = {
       { source: "/api/historical/:path*", destination: `${API}/api/historical/:path*` },
       { source: "/api/forecast/:path*", destination: `${API}/api/forecast/:path*` },
       { source: "/api/models", destination: `${API}/api/models` },
+      { source: "/api/ai/:path*", destination: `${API}/api/ai/:path*` },
       { source: "/api/explain/:path*", destination: `${API}/api/explain/:path*` },
       { source: "/api/scenarios/:path*", destination: `${API}/api/scenarios/:path*` },
       { source: "/api/validation", destination: `${API}/api/validation` },
