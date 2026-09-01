@@ -1,10 +1,9 @@
-from fastapi import FastAPI, HTTPException
+from __future__ import annotations
+
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
-from backend.config.climate_config import (
-    CLIMATE_VARIABLES,
-)
-
+from backend.config.climate_config import CLIMATE_VARIABLES
 from backend.services.rainfall_service import (
     get_dataset_info,
     get_daily_statistics,
@@ -13,413 +12,207 @@ from backend.services.rainfall_service import (
     get_rainfall_grid,
     get_rainfall_grid_info,
 )
-
 from backend.services.extreme_event_service import (
     detect_extreme_rainfall,
     get_extreme_rainfall_geojson,
     get_extreme_event_summary,
 )
-
 from backend.services.climate_risk_service import (
     get_climate_risk_summary,
     get_climate_risk_grid,
 )
-
-# ============================================================
-# APPLICATION
-# ============================================================
+from backend.services.digital_twin_service import (
+    get_twin_state_summary,
+    get_twin_state,
+    get_historical_rainfall,
+    get_baseline_forecast,
+    get_model_catalog,
+    get_validation_summary,
+    explain_rainfall_risk,
+    simulate_rainfall_scenario,
+    get_provenance,
+    get_system_health,
+)
 
 app = FastAPI(
     title="India Climate Digital Twin API",
-
-    description=(
-        "Scientific climate data API "
-        "for the India Climate Digital Twin"
-    ),
-
-    version="0.3.0",
+    description="Operational scientific API for the India Climate Digital Twin.",
+    version="0.4.0",
 )
-
-
-# ============================================================
-# CORS
-# ============================================================
 
 app.add_middleware(
     CORSMiddleware,
-
     allow_origins=["*"],
-
     allow_credentials=True,
-
     allow_methods=["*"],
-
     allow_headers=["*"],
 )
 
 
-# ============================================================
-# ROOT
-# ============================================================
+def _call(function, *args, **kwargs):
+    try:
+        return function(*args, **kwargs)
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    except FileNotFoundError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
+    except Exception as error:
+        raise HTTPException(status_code=500, detail=str(error)) from error
+
 
 @app.get("/")
 def root():
     return {
-        "project":
-            "India Climate Digital Twin",
-
-        "status":
-            "online",
-
-        "engine":
-            "Python + FastAPI",
-
-        "version":
-            "0.3.0",
+        "project": "India Climate Digital Twin",
+        "status": "online",
+        "engine": "Python + FastAPI",
+        "version": "0.4.0",
     }
 
-
-# ============================================================
-# API STATUS
-# ============================================================
 
 @app.get("/api/status")
 def status():
-
-    return {
-        "status":
-            "online",
-
-        "data_source":
-            "IMD",
-
-        "scientific_engine":
-            "Python + Xarray",
-
-        "dataset":
-            "RF25_ind2024_rfp25.nc",
-
-        "variable":
-            "RAINFALL",
-
-        "stage":
-            "Step 8K",
-    }
+    return get_system_health()
 
 
-# ============================================================
-# DATASET INFORMATION
-# ============================================================
+@app.get("/api/health")
+def health():
+    return get_system_health()
 
-@app.get("/api/rainfall/info")
-def rainfall_info():
-
-    try:
-
-        return get_dataset_info()
-
-    except Exception as error:
-
-        raise HTTPException(
-            status_code=500,
-
-            detail=str(error),
-        )
-
-
-# ============================================================
-# DAILY RAINFALL GRID
-# ============================================================
-
-@app.get(
-    "/api/rainfall/daily/{date}"
-)
-def rainfall_daily(
-    date: str
-):
-
-    try:
-
-        return get_daily_rainfall(
-            date
-        )
-
-    except Exception as error:
-
-        raise HTTPException(
-            status_code=400,
-
-            detail=str(error),
-        )
-
-
-# ============================================================
-# DAILY RAINFALL STATISTICS
-# ============================================================
-
-@app.get(
-    "/api/rainfall/statistics/{date}"
-)
-def rainfall_statistics(
-    date: str
-):
-
-    try:
-
-        return get_daily_statistics(
-            date
-        )
-
-    except Exception as error:
-
-        raise HTTPException(
-            status_code=400,
-
-            detail=str(error),
-        )
-
-
-# ============================================================
-# INDIA DAILY SUMMARY
-# ============================================================
-
-@app.get(
-    "/api/rainfall/summary/{date}"
-)
-def rainfall_summary(
-    date: str
-):
-
-    try:
-
-        return get_india_daily_summary(
-            date
-        )
-
-    except Exception as error:
-
-        raise HTTPException(
-            status_code=400,
-
-            detail=str(error),
-        )
-
-
-# ============================================================
-# RAINFALL GRID AS GEOJSON
-# ============================================================
-
-@app.get(
-    "/api/rainfall/grid/{date}"
-)
-def rainfall_grid(
-    date: str
-):
-
-    try:
-
-        return get_rainfall_grid(
-            date
-        )
-
-    except Exception as error:
-
-        raise HTTPException(
-            status_code=400,
-
-            detail=str(error),
-        )
-
-
-# ============================================================
-# RAINFALL GRID INFORMATION
-# ============================================================
-
-@app.get(
-    "/api/rainfall/grid-info/{date}"
-)
-def rainfall_grid_info(
-    date: str
-):
-
-    try:
-
-        return get_rainfall_grid_info(
-            date
-        )
-
-    except Exception as error:
-
-        raise HTTPException(
-            status_code=400,
-
-            detail=str(error),
-        )
-        # ============================================================
-# CLIMATE VARIABLES
-# ============================================================
 
 @app.get("/api/climate/variables")
 def climate_variables():
+    return {"variables": CLIMATE_VARIABLES}
 
-    return {
-        "variables": CLIMATE_VARIABLES
-    }
-# ============================================================
-# EXTREME RAINFALL EVENTS
-# ============================================================
 
-@app.get(
-    "/api/extreme-events/rainfall/{date}"
-)
-def extreme_rainfall_events(
-    date: str
+@app.get("/api/rainfall/info")
+def rainfall_info():
+    return _call(get_dataset_info)
+
+
+@app.get("/api/rainfall/daily/{date}")
+def rainfall_daily(date: str):
+    return _call(get_daily_rainfall, date)
+
+
+@app.get("/api/rainfall/statistics/{date}")
+def rainfall_statistics(date: str):
+    return _call(get_daily_statistics, date)
+
+
+@app.get("/api/rainfall/summary/{date}")
+def rainfall_summary(date: str):
+    return _call(get_india_daily_summary, date)
+
+
+@app.get("/api/rainfall/grid/{date}")
+def rainfall_grid(date: str):
+    return _call(get_rainfall_grid, date)
+
+
+@app.get("/api/rainfall/grid-info/{date}")
+def rainfall_grid_info(date: str):
+    return _call(get_rainfall_grid_info, date)
+
+
+@app.get("/api/extreme-events/rainfall/{date}")
+def extreme_rainfall_events(date: str):
+    return _call(detect_extreme_rainfall, date)
+
+
+@app.get("/api/extreme-events/summary/{date}")
+def extreme_rainfall_summary(date: str):
+    return _call(get_extreme_event_summary, date)
+
+
+@app.get("/api/extreme-events/rainfall/geojson/{date}")
+def extreme_rainfall_geojson(date: str):
+    return _call(get_extreme_rainfall_geojson, date)
+
+
+@app.get("/api/risk/summary/{date}")
+def climate_risk_summary(date: str):
+    return _call(get_climate_risk_summary, date)
+
+
+@app.get("/api/risk/grid/{date}")
+def climate_risk_grid(date: str):
+    return _call(get_climate_risk_grid, date)
+
+
+# -------------------- DIGITAL TWIN STATE --------------------
+
+@app.get("/api/twin/summary")
+def twin_summary():
+    return _call(get_twin_state_summary)
+
+
+@app.get("/api/twin/state")
+def twin_state(date: str | None = Query(default=None)):
+    return _call(get_twin_state, date)
+
+
+# -------------------- HISTORICAL ANALYTICS --------------------
+
+@app.get("/api/historical/rainfall")
+def historical_rainfall(
+    start: str | None = Query(default=None),
+    end: str | None = Query(default=None),
+    limit: int = Query(default=365, ge=1, le=5000),
 ):
-
-    try:
-
-        return detect_extreme_rainfall(
-            date
-        )
-
-    except ValueError as error:
-
-        raise HTTPException(
-            status_code=400,
-            detail=str(error),
-        )
-
-    except Exception as error:
-
-        raise HTTPException(
-            status_code=500,
-            detail=str(error),
-        )
+    return _call(get_historical_rainfall, start, end, limit)
 
 
-# ============================================================
-# EXTREME RAINFALL SUMMARY
-# ============================================================
+# -------------------- FORECAST --------------------
 
-@app.get(
-    "/api/extreme-events/summary/{date}"
-)
-def extreme_rainfall_summary(
-    date: str
+@app.get("/api/forecast/baseline")
+def forecast_baseline(
+    horizon: int = Query(default=7, ge=1, le=14),
 ):
-
-    try:
-
-        return get_extreme_event_summary(
-            date
-        )
-
-    except ValueError as error:
-
-        raise HTTPException(
-            status_code=400,
-            detail=str(error),
-        )
-
-    except Exception as error:
-
-        raise HTTPException(
-            status_code=500,
-            detail=str(error),
-        )
+    return _call(get_baseline_forecast, horizon)
 
 
-# ============================================================
-# EXTREME RAINFALL GEOJSON
-# ============================================================
+@app.get("/api/models")
+def models():
+    return _call(get_model_catalog)
 
-@app.get(
-    "/api/extreme-events/rainfall/geojson/{date}"
-)
-def extreme_rainfall_geojson(
-    date: str
+
+# -------------------- EXPLAINABILITY --------------------
+
+@app.get("/api/explain/rainfall")
+def explain_rainfall(
+    rainfall_mm: float = Query(..., ge=0, le=10000),
 ):
-
-    try:
-
-        return get_extreme_rainfall_geojson(
-            date
-        )
-
-    except ValueError as error:
-
-        raise HTTPException(
-            status_code=400,
-            detail=str(error),
-        )
-
-    except Exception as error:
-
-        raise HTTPException(
-            status_code=500,
-            detail=str(error),
-        )
+    return _call(explain_rainfall_risk, rainfall_mm)
 
 
-# ============================================================
-# CLIMATE RISK SUMMARY
-# ============================================================
+# -------------------- SCENARIO / WHAT-IF --------------------
 
-@app.get(
-    "/api/risk/summary/{date}"
-)
-def climate_risk_summary(
-    date: str
+@app.get("/api/scenarios/simulate")
+def scenario_simulate(
+    base_date: str = Query(...),
+    precipitation_delta_pct: float = Query(default=0.0, ge=-100, le=300),
+    temperature_delta_c: float = Query(default=0.0, ge=-10, le=10),
+    sea_level_rise_m: float = Query(default=0.0, ge=0, le=2),
+    scenario: str = Query(default="custom", min_length=1, max_length=80),
 ):
-
-    try:
-
-        return get_climate_risk_summary(
-            date
-        )
-
-    except ValueError as error:
-
-        raise HTTPException(
-            status_code=400,
-            detail=str(error),
-        )
-
-    except Exception as error:
-
-        raise HTTPException(
-            status_code=500,
-            detail=str(error),
-        )
+    return _call(
+        simulate_rainfall_scenario,
+        base_date,
+        precipitation_delta_pct,
+        temperature_delta_c,
+        sea_level_rise_m,
+        scenario,
+    )
 
 
-# ============================================================
-# CLIMATE RISK GRID
-# ============================================================
+# -------------------- VALIDATION / PROVENANCE --------------------
 
-@app.get(
-    "/api/risk/grid/{date}"
-)
-def climate_risk_grid(
-    date: str
-):
+@app.get("/api/validation")
+def validation():
+    return _call(get_validation_summary)
 
-    try:
 
-        return get_climate_risk_grid(
-            date
-        )
-
-    except ValueError as error:
-
-        raise HTTPException(
-            status_code=400,
-            detail=str(error),
-        )
-
-    except Exception as error:
-
-        raise HTTPException(
-            status_code=500,
-            detail=str(error),
-        )
+@app.get("/api/provenance")
+def provenance():
+    return _call(get_provenance)
