@@ -28,15 +28,16 @@ jobs:
       - run: python -m pip install --upgrade pip
       - run: python -m pip install -r backend/requirements.txt
       - run: python -m compileall backend scripts
-      - run: python - <<'PY'
-import importlib
-mods = [
-    'backend.api.main',
-    'backend.services.digital_twin_service',
-    'backend.services.climate_risk_service',
-    'backend.services.extreme_event_service',
-]
-for mod in mods:
-    importlib.import_module(mod)
-    print('IMPORT PASS', mod)
-PY
+      - run: |
+          python - <<'PY'
+          import importlib
+          mods = [
+              'backend.api.main',
+              'backend.services.digital_twin_service',
+              'backend.services.climate_risk_service',
+              'backend.services.extreme_event_service',
+          ]
+          for mod in mods:
+              importlib.import_module(mod)
+              print('IMPORT PASS', mod)
+          PY
