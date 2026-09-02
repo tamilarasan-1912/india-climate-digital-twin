@@ -1,10 +1,5 @@
 {
   "framework": "nextjs",
   "buildCommand": "npm run build",
-  "installCommand": "npm install",
-  "env": {
-    "NEXT_PUBLIC_API_URL": {
-      "description": "Public URL of the deployed FastAPI backend on Render"
-    }
-  }
+  "installCommand": "npm install"
 }
