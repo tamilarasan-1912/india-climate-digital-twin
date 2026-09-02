@@ -37,6 +37,10 @@ from backend.services.twin_engine import (
     build_what_if,
     get_twin_health,
 )
+from backend.services.india_hierarchy_service import (
+    get_india_hierarchy,
+    resolve_location,
+)
 from backend.services.prithvi_wxc_service import (
     get_prithvi_wxc_status,
     validate_prithvi_inputs,
@@ -46,7 +50,7 @@ from backend.services.prithvi_wxc_service import (
 app = FastAPI(
     title="India Climate Digital Twin API",
     description="Operational scientific API for the India Climate Digital Twin.",
-    version="0.6.0",
+    version="0.7.0",
 )
 
 app.add_middleware(
@@ -76,8 +80,8 @@ def root():
     return {
         "project": "India Climate Digital Twin",
         "status": "online",
-        "engine": "Python + FastAPI + Climate Twin Engine",
-        "version": "0.6.0",
+        "engine": "Python + FastAPI + India Climate Twin Core",
+        "version": "0.7.0",
     }
 
 
@@ -95,6 +99,20 @@ def health():
 def climate_variables():
     return {"variables": CLIMATE_VARIABLES}
 
+
+# -------------------- INDIA HIERARCHY --------------------
+
+@app.get("/api/india/hierarchy")
+def india_hierarchy():
+    return get_india_hierarchy()
+
+
+@app.get("/api/india/location/{location_id}")
+def india_location(location_id: str):
+    return _call(resolve_location, location_id)
+
+
+# -------------------- RAINFALL --------------------
 
 @app.get("/api/rainfall/info")
 def rainfall_info():
@@ -126,6 +144,8 @@ def rainfall_grid_info(date: str):
     return _call(get_rainfall_grid_info, date)
 
 
+# -------------------- EXTREME EVENTS --------------------
+
 @app.get("/api/extreme-events/rainfall/{date}")
 def extreme_rainfall_events(date: str):
     return _call(detect_extreme_rainfall, date)
@@ -140,6 +160,8 @@ def extreme_rainfall_summary(date: str):
 def extreme_rainfall_geojson(date: str):
     return _call(get_extreme_rainfall_geojson, date)
 
+
+# -------------------- RISK --------------------
 
 @app.get("/api/risk/summary/{date}")
 def climate_risk_summary(date: str):
