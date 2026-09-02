@@ -33,8 +33,21 @@ export default function ClimateMap({ layers, onStateSelect, onCoords, zoomReques
       zoom: 4.25,
       minZoom: 3,
       maxZoom: 10,
-      style: { version: 8, sources: {}, layers: [{ id: "background", type: "background", paint: { "background-color": "#071018" } }] },
-      attributionControl: false,
+      style: {
+        version: 8,
+        sources: {
+          osm: {
+            type: "raster",
+            tiles: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],
+            tileSize: 256,
+            attribution: "© OpenStreetMap contributors",
+          },
+        },
+        layers: [
+          { id: "osm", type: "raster", source: "osm", paint: { "raster-opacity": 0.78 } },
+        ],
+      },
+      attributionControl: true,
     });
     map.current = m;
     m.addControl(new NavigationControl({ showCompass: true }), "top-left");
@@ -44,8 +57,8 @@ export default function ClimateMap({ layers, onStateSelect, onCoords, zoomReques
         const current = latestLayers.current;
         const states = await fetch(INDIA, { cache: "no-store" }).then(r => { if (!r.ok) throw new Error("India boundary data unavailable"); return r.json(); });
         m.addSource("india-states", { type: "geojson", data: states });
-        m.addLayer({ id: "states-fill", type: "fill", source: "india-states", layout: { visibility: current.terrain ? "visible" : "none" }, paint: { "fill-color": "#102a39", "fill-opacity": 0.28 } });
-        m.addLayer({ id: "states-outline", type: "line", source: "india-states", layout: { visibility: current.terrain ? "visible" : "none" }, paint: { "line-color": "#78909c", "line-width": 1.1, "line-opacity": 0.75 } });
+        m.addLayer({ id: "states-fill", type: "fill", source: "india-states", layout: { visibility: current.terrain ? "visible" : "none" }, paint: { "fill-color": "#102a39", "fill-opacity": 0.22 } });
+        m.addLayer({ id: "states-outline", type: "line", source: "india-states", layout: { visibility: current.terrain ? "visible" : "none" }, paint: { "line-color": "#9fb4bd", "line-width": 1.1, "line-opacity": 0.8 } });
         m.on("click", "states-fill", e => {
           const p = e.features?.[0]?.properties as Record<string, unknown> | undefined;
           const name = String(p?.shapeName ?? p?.NAME_1 ?? p?.st_nm ?? p?.STATE ?? "India");
@@ -60,17 +73,15 @@ export default function ClimateMap({ layers, onStateSelect, onCoords, zoomReques
           m.addSource("rainfall", { type: "geojson", data: rainfall });
           m.addLayer({ id: "rainfall", type: "circle", source: "rainfall", layout: { visibility: current.satellite || current.anomalies ? "visible" : "none" }, paint: { "circle-radius": 5, "circle-color": ["interpolate", ["linear"], ["get", "rainfall_mm"], 0, "#38bdf8", 50, "#ffc176", 100, "#ff5f5f"], "circle-opacity": 0.72, "circle-stroke-color": "#dff8ff", "circle-stroke-width": 0.5 } });
         }
-
         const events = await fetch(`/api/extreme-events/rainfall/geojson/${DATE}`, { cache: "no-store" }).then(r => r.ok ? r.json() : null).catch(() => null);
         if (events?.features) {
           m.addSource("events", { type: "geojson", data: events });
           m.addLayer({ id: "events", type: "circle", source: "events", layout: { visibility: current.events ? "visible" : "none" }, paint: { "circle-radius": 6, "circle-color": "#ffb4ab", "circle-stroke-color": "#ff5f5f", "circle-stroke-width": 1.2 } });
         }
-
         const risk = await fetch(`/api/risk/grid/${DATE}`, { cache: "no-store" }).then(r => r.ok ? r.json() : null).catch(() => null);
         if (risk?.features) {
           m.addSource("risk", { type: "geojson", data: risk });
-          m.addLayer({ id: "risk", type: "circle", source: "risk", layout: { visibility: current.risk ? "visible" : "none" }, paint: { "circle-radius": 5, "circle-color": ["match", ["get", "risk_category"], "Extreme", "#ef4444", "High", "#f97316", "Moderate", "#ffc176", "#38bdf8"], "circle-opacity": 0.7 } });
+          m.addLayer({ id: "risk", type: "circle", source: "risk", layout: { visibility: current.risk ? "visible" : "none" }, paint: { "circle-radius": 5, "circle-color": ["match", ["get", "risk_category"], "Extreme", "#ef4444", "High", "#f97316", "Moderate", "#ffc176", "#38bdf8"], "circle-opacity": 0.78 } });
         }
       } catch (e) { console.error("Climate map data error", e); }
     });
