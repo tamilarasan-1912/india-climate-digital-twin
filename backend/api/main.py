@@ -22,16 +22,20 @@ from backend.services.climate_risk_service import (
     get_climate_risk_grid,
 )
 from backend.services.digital_twin_service import (
-    get_twin_state_summary,
     get_twin_state,
     get_historical_rainfall,
     get_baseline_forecast,
     get_model_catalog,
     get_validation_summary,
     explain_rainfall_risk,
-    simulate_rainfall_scenario,
     get_provenance,
     get_system_health,
+)
+from backend.services.twin_engine import (
+    build_twin_snapshot,
+    build_what_next,
+    build_what_if,
+    get_twin_health,
 )
 from backend.services.prithvi_wxc_service import (
     get_prithvi_wxc_status,
@@ -42,7 +46,7 @@ from backend.services.prithvi_wxc_service import (
 app = FastAPI(
     title="India Climate Digital Twin API",
     description="Operational scientific API for the India Climate Digital Twin.",
-    version="0.5.0",
+    version="0.6.0",
 )
 
 app.add_middleware(
@@ -72,8 +76,8 @@ def root():
     return {
         "project": "India Climate Digital Twin",
         "status": "online",
-        "engine": "Python + FastAPI",
-        "version": "0.5.0",
+        "engine": "Python + FastAPI + Climate Twin Engine",
+        "version": "0.6.0",
     }
 
 
@@ -147,11 +151,47 @@ def climate_risk_grid(date: str):
     return _call(get_climate_risk_grid, date)
 
 
-# -------------------- DIGITAL TWIN STATE --------------------
+# -------------------- CLIMATE DIGITAL TWIN --------------------
+
+@app.get("/api/twin/health")
+def twin_health():
+    return get_twin_health()
+
 
 @app.get("/api/twin/summary")
-def twin_summary():
-    return _call(get_twin_state_summary)
+def twin_summary(date: str | None = Query(default=None)):
+    return _call(build_twin_snapshot, date)
+
+
+@app.get("/api/twin/now")
+def twin_now(date: str | None = Query(default=None)):
+    return _call(build_twin_snapshot, date)
+
+
+@app.get("/api/twin/next")
+def twin_next(
+    date: str | None = Query(default=None),
+    horizon: int = Query(default=7, ge=1, le=14),
+):
+    return _call(build_what_next, date, horizon)
+
+
+@app.get("/api/twin/what-if")
+def twin_what_if(
+    base_date: str = Query(...),
+    precipitation_delta_pct: float = Query(default=0.0, ge=-100, le=300),
+    temperature_delta_c: float = Query(default=0.0, ge=-10, le=10),
+    sea_level_rise_m: float = Query(default=0.0, ge=0, le=2),
+    scenario: str = Query(default="custom", min_length=1, max_length=80),
+):
+    return _call(
+        build_what_if,
+        base_date,
+        precipitation_delta_pct,
+        temperature_delta_c,
+        sea_level_rise_m,
+        scenario,
+    )
 
 
 @app.get("/api/twin/state")
@@ -221,7 +261,7 @@ def scenario_simulate(
     scenario: str = Query(default="custom", min_length=1, max_length=80),
 ):
     return _call(
-        simulate_rainfall_scenario,
+        build_what_if,
         base_date,
         precipitation_delta_pct,
         temperature_delta_c,
