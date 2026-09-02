@@ -27,6 +27,7 @@ export default function ClimateMap({ layers, onStateSelect, onCoords, zoomReques
 
   useEffect(() => {
     if (!el.current || map.current) return;
+
     const m = new Map({
       container: el.current,
       center: [78.9629, 20.5937],
@@ -47,51 +48,115 @@ export default function ClimateMap({ layers, onStateSelect, onCoords, zoomReques
           { id: "osm", type: "raster", source: "osm", paint: { "raster-opacity": 0.78 } },
         ],
       },
-      attributionControl: true,
     });
+
     map.current = m;
     m.addControl(new NavigationControl({ showCompass: true }), "top-left");
     m.on("mousemove", e => coordCb.current?.(e.lngLat.lat, e.lngLat.lng));
+
     m.on("load", async () => {
       try {
         const current = latestLayers.current;
-        const states = await fetch(INDIA, { cache: "no-store" }).then(r => { if (!r.ok) throw new Error("India boundary data unavailable"); return r.json(); });
-        m.addSource("india-states", { type: "geojson", data: states });
-        m.addLayer({ id: "states-fill", type: "fill", source: "india-states", layout: { visibility: current.terrain ? "visible" : "none" }, paint: { "fill-color": "#102a39", "fill-opacity": 0.22 } });
-        m.addLayer({ id: "states-outline", type: "line", source: "india-states", layout: { visibility: current.terrain ? "visible" : "none" }, paint: { "line-color": "#9fb4bd", "line-width": 1.1, "line-opacity": 0.8 } });
-        m.on("click", "states-fill", e => {
-          const p = e.features?.[0]?.properties as Record<string, unknown> | undefined;
-          const name = String(p?.shapeName ?? p?.NAME_1 ?? p?.st_nm ?? p?.STATE ?? "India");
-          stateCb.current?.(name);
-          new Popup({ closeButton: true, closeOnClick: true }).setLngLat(e.lngLat).setHTML(`<strong>${name}</strong><br/><small>State selected</small>`).addTo(m);
+        const states = await fetch(INDIA, { cache: "no-store" }).then(r => {
+          if (!r.ok) throw new Error("India boundary data unavailable");
+          return r.json();
         });
-        m.on("mouseenter", "states-fill", () => { m.getCanvas().style.cursor = "pointer"; });
-        m.on("mouseleave", "states-fill", () => { m.getCanvas().style.cursor = ""; });
 
-        const rainfall = await fetch(`/api/rainfall/grid/${DATE}`, { cache: "no-store" }).then(r => r.ok ? r.json() : null).catch(() => null);
-        if (rainfall?.features) {
+        if (!m.getSource("india-states")) {
+          m.addSource("india-states", { type: "geojson", data: states });
+          m.addLayer({
+            id: "states-fill",
+            type: "fill",
+            source: "india-states",
+            layout: { visibility: current.terrain ? "visible" : "none" },
+            paint: { "fill-color": "#102a39", "fill-opacity": 0.22 },
+          });
+          m.addLayer({
+            id: "states-outline",
+            type: "line",
+            source: "india-states",
+            layout: { visibility: current.terrain ? "visible" : "none" },
+            paint: { "line-color": "#9fb4bd", "line-width": 1.1, "line-opacity": 0.8 },
+          });
+
+          m.on("click", "states-fill", e => {
+            const p = e.features?.[0]?.properties as Record<string, unknown> | undefined;
+            const name = String(p?.shapeName ?? p?.NAME_1 ?? p?.st_nm ?? p?.STATE ?? "India");
+            stateCb.current?.(name);
+            new Popup({ closeButton: true, closeOnClick: true })
+              .setLngLat(e.lngLat)
+              .setHTML(`<strong>${escapeHtml(name)}</strong><br/><small>State selected</small>`)
+              .addTo(m);
+          });
+          m.on("mouseenter", "states-fill", () => { m.getCanvas().style.cursor = "pointer"; });
+          m.on("mouseleave", "states-fill", () => { m.getCanvas().style.cursor = ""; });
+        }
+
+        const rainfall = await fetch(`/api/rainfall/grid/${DATE}`, { cache: "no-store" })
+          .then(r => r.ok ? r.json() : null).catch(() => null);
+        if (rainfall?.features && !m.getSource("rainfall")) {
           m.addSource("rainfall", { type: "geojson", data: rainfall });
-          m.addLayer({ id: "rainfall", type: "circle", source: "rainfall", layout: { visibility: current.satellite || current.anomalies ? "visible" : "none" }, paint: { "circle-radius": 5, "circle-color": ["interpolate", ["linear"], ["get", "rainfall_mm"], 0, "#38bdf8", 50, "#ffc176", 100, "#ff5f5f"], "circle-opacity": 0.72, "circle-stroke-color": "#dff8ff", "circle-stroke-width": 0.5 } });
+          m.addLayer({
+            id: "rainfall",
+            type: "circle",
+            source: "rainfall",
+            layout: { visibility: current.satellite || current.anomalies ? "visible" : "none" },
+            paint: {
+              "circle-radius": 5,
+              "circle-color": ["interpolate", ["linear"], ["get", "rainfall_mm"], 0, "#38bdf8", 50, "#ffc176", 100, "#ff5f5f"],
+              "circle-opacity": 0.72,
+              "circle-stroke-color": "#dff8ff",
+              "circle-stroke-width": 0.5,
+            },
+          });
         }
-        const events = await fetch(`/api/extreme-events/rainfall/geojson/${DATE}`, { cache: "no-store" }).then(r => r.ok ? r.json() : null).catch(() => null);
-        if (events?.features) {
+
+        const events = await fetch(`/api/extreme-events/rainfall/geojson/${DATE}`, { cache: "no-store" })
+          .then(r => r.ok ? r.json() : null).catch(() => null);
+        if (events?.features && !m.getSource("events")) {
           m.addSource("events", { type: "geojson", data: events });
-          m.addLayer({ id: "events", type: "circle", source: "events", layout: { visibility: current.events ? "visible" : "none" }, paint: { "circle-radius": 6, "circle-color": "#ffb4ab", "circle-stroke-color": "#ff5f5f", "circle-stroke-width": 1.2 } });
+          m.addLayer({
+            id: "events",
+            type: "circle",
+            source: "events",
+            layout: { visibility: current.events ? "visible" : "none" },
+            paint: { "circle-radius": 6, "circle-color": "#ffb4ab", "circle-stroke-color": "#ff5f5f", "circle-stroke-width": 1.2 },
+          });
         }
-        const risk = await fetch(`/api/risk/grid/${DATE}`, { cache: "no-store" }).then(r => r.ok ? r.json() : null).catch(() => null);
-        if (risk?.features) {
+
+        const risk = await fetch(`/api/risk/grid/${DATE}`, { cache: "no-store" })
+          .then(r => r.ok ? r.json() : null).catch(() => null);
+        if (risk?.features && !m.getSource("risk")) {
           m.addSource("risk", { type: "geojson", data: risk });
-          m.addLayer({ id: "risk", type: "circle", source: "risk", layout: { visibility: current.risk ? "visible" : "none" }, paint: { "circle-radius": 5, "circle-color": ["match", ["get", "risk_category"], "Extreme", "#ef4444", "High", "#f97316", "Moderate", "#ffc176", "#38bdf8"], "circle-opacity": 0.78 } });
+          m.addLayer({
+            id: "risk",
+            type: "circle",
+            source: "risk",
+            layout: { visibility: current.risk ? "visible" : "none" },
+            paint: {
+              "circle-radius": 5,
+              "circle-color": ["match", ["get", "risk_category"], "Extreme", "#ef4444", "High", "#f97316", "Moderate", "#ffc176", "#38bdf8"],
+              "circle-opacity": 0.78,
+            },
+          });
         }
-      } catch (e) { console.error("Climate map data error", e); }
+      } catch (e) {
+        console.error("Climate map data error", e);
+      }
     });
-    return () => { m.remove(); map.current = null; };
+
+    return () => {
+      m.remove();
+      map.current = null;
+    };
   }, []);
 
   useEffect(() => {
     const m = map.current;
     if (!m || !m.isStyleLoaded()) return;
-    const set = (id: string, visible: boolean) => { if (m.getLayer(id)) m.setLayoutProperty(id, "visibility", visible ? "visible" : "none"); };
+    const set = (id: string, visible: boolean) => {
+      if (m.getLayer(id)) m.setLayoutProperty(id, "visibility", visible ? "visible" : "none");
+    };
     set("states-fill", layers.terrain);
     set("states-outline", layers.terrain);
     set("rainfall", layers.satellite || layers.anomalies);
@@ -108,4 +173,13 @@ export default function ClimateMap({ layers, onStateSelect, onCoords, zoomReques
   }, [zoomRequest]);
 
   return <div ref={el} className="climate-map" aria-label="Interactive India climate map" />;
+}
+
+function escapeHtml(value: string) {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
 }
