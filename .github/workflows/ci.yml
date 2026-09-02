@@ -34,6 +34,7 @@ jobs:
           mods = [
               'backend.api.main',
               'backend.services.digital_twin_service',
+              'backend.services.twin_engine',
               'backend.services.climate_risk_service',
               'backend.services.extreme_event_service',
           ]
