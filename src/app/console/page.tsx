@@ -1,100 +1,93 @@
 "use client";
 
-import { useEffect, useMemo, useState, type ReactNode, type Dispatch, type SetStateAction } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import ClimateMap from "../components/ClimateMap";
 
-const TOP = ["Overview", "Digital Twin", "Earth Observation", "Climate", "Anomalies"] as const;
-const SIDE = ["Location", "Hierarchy", "Twin State", "Details", "Risk", "Historical"] as const;
 type LayerState = { satellite: boolean; terrain: boolean; anomalies: boolean; risk: boolean; events: boolean };
-type ZoomRequest = { type: "in" | "out" | "reset"; nonce: number };
+type Modal = "notifications" | "account" | "export" | "location" | null;
 
-function Card({ title, children }: { title: string; children: ReactNode }) { return <section className="card"><header>{title}</header><div className="card-body">{children}</div></section>; }
-function Metric({ label, value }: { label: string; value: string }) { return <div className="metric"><small>{label}</small><b>{value}</b></div>; }
-function JsonBlock({ value }: { value: unknown }) { return <pre className="json">{value == null ? "NO DATA / SERVICE UNAVAILABLE" : JSON.stringify(value, null, 2)}</pre>; }
+const NAV = [["▦", "Overview"], ["◈", "Digital Twin"], ["◉", "Observations"], ["◒", "Climate"], ["↗", "Forecast"], ["!", "Risk"], ["⚡", "Extreme Events"], ["⌁", "What-If"], ["◷", "Historical"], ["✓", "Validation"], ["⌘", "Provenance"], ["⚙", "System"]] as const;
+const STATE_NAMES: Record<string, string> = { "tamil nadu": "IN-TN", "karnataka": "IN-KA", "kerala": "IN-KL", "maharashtra": "IN-MH", "delhi": "IN-DL", "west bengal": "IN-WB", "andhra pradesh": "IN-AP", "telangana": "IN-TG", "gujarat": "IN-GJ", "rajasthan": "IN-RJ", "odisha": "IN-OR", "uttar pradesh": "IN-UP", "madhya pradesh": "IN-MP", "punjab": "IN-PB", "bihar": "IN-BR", "assam": "IN-AS" };
+
+function Card({ title, children, action }: { title: string; children: ReactNode; action?: ReactNode }) { return <section className="card"><div className="card-head"><span>{title}</span>{action}</div><div className="card-body">{children}</div></section>; }
+function Metric({ label, value, unit = "" }: { label: string; value: unknown; unit?: string }) { const v = value === null || value === undefined ? "NO DATA" : String(value); return <div className="metric"><span>{label}</span><strong>{v}</strong>{unit && v !== "NO DATA" ? <em>{unit}</em> : null}</div>; }
+function Status({ ok, text }: { ok: boolean; text?: string }) { return <span className={`status ${ok ? "ok" : "bad"}`}><i />{text ?? (ok ? "CONNECTED" : "UNAVAILABLE")}</span>; }
+function val(obj: any, path: string[], fallback: any = null): any { return path.reduce((a, k) => a?.[k], obj) ?? fallback; }
+function Json({ data }: { data: any }) { return <pre className="json">{data == null ? "NO DATA / SERVICE UNAVAILABLE" : JSON.stringify(data, null, 2)}</pre>; }
 
 export default function ConsolePage() {
-  const [top, setTop] = useState<(typeof TOP)[number]>("Overview");
-  const [side, setSide] = useState<(typeof SIDE)[number]>("Location");
-  const [selected, setSelected] = useState("INDIA");
+  const [nav, setNav] = useState("Overview");
+  const [selectedId, setSelectedId] = useState("IN");
+  const [selectedName, setSelectedName] = useState("INDIA");
+  const [date, setDate] = useState("2024-07-15");
   const [coords, setCoords] = useState("20.5937° N, 78.9629° E");
   const [layers, setLayers] = useState<LayerState>({ satellite: true, terrain: true, anomalies: false, risk: false, events: false });
-  const [zoom, setZoom] = useState<ZoomRequest>();
-  const [search, setSearch] = useState("");
-  const [modal, setModal] = useState<string | null>(null);
-  const [playing, setPlaying] = useState(false);
-  const [timeline, setTimeline] = useState(75);
+  const [zoom, setZoom] = useState<{ type: "in" | "out" | "reset"; nonce: number }>();
   const [horizon, setHorizon] = useState(7);
-  const [scenario, setScenario] = useState({ temp: 2.5, precip: -15, sea: 0.4 });
-  const [simulation, setSimulation] = useState(false);
-  const [api, setApi] = useState<Record<string, unknown>>({});
+  const [data, setData] = useState<Record<string, any>>({});
+  const [stateData, setStateData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [modal, setModal] = useState<Modal>(null);
+  const [search, setSearch] = useState("");
+  const [startDate, setStartDate] = useState("2024-01-01");
+  const [endDate, setEndDate] = useState("2024-07-15");
+  const [scenario, setScenario] = useState({ precip: -15, temp: 2, sea: 0.4 });
+  const [simulation, setSimulation] = useState<any>(null);
+  const [simulating, setSimulating] = useState(false);
+  const [historical, setHistorical] = useState<any>(null);
 
-  useEffect(() => {
-    if (!playing) return;
-    const id = window.setInterval(() => setTimeline(v => v >= 99 ? 0 : v + 1), 250);
-    return () => clearInterval(id);
-  }, [playing]);
+  const apiFetch = useCallback(async (key: string, url: string) => { try { const r = await fetch(url, { cache: "no-store" }); return [key, r.ok ? await r.json() : null] as const; } catch { return [key, null] as const; } }, []);
+  const refresh = useCallback(async () => {
+    setRefreshing(true); setLoading(true);
+    const entries = await Promise.all([
+      apiFetch("health", "/api/health"), apiFetch("rainfall", `/api/rainfall/summary/${date}`), apiFetch("risk", `/api/risk/summary/${date}`),
+      apiFetch("events", `/api/extreme-events/summary/${date}`), apiFetch("forecast", `/api/twin/next?date=${date}&horizon=${horizon}`), apiFetch("twin", `/api/twin/summary?date=${date}`),
+      apiFetch("hierarchy", "/api/india/hierarchy"), apiFetch("variables", "/api/climate/variables"), apiFetch("models", "/api/models"), apiFetch("validation", "/api/validation"),
+      apiFetch("provenance", "/api/provenance"), apiFetch("prithvi", "/api/ai/prithvi/status"), apiFetch("historical", `/api/historical/rainfall?start=${startDate}&end=${endDate}&limit=365`),
+    ]);
+    setData(Object.fromEntries(entries)); setHistorical(Object.fromEntries(entries).historical); setLoading(false); setRefreshing(false);
+  }, [apiFetch, date, endDate, horizon, startDate]);
+  useEffect(() => { refresh(); }, [refresh]);
+  useEffect(() => { if (selectedId === "IN") { setStateData(null); return; } let alive = true; apiFetch("state", `/api/india/state/${selectedId}/twin/${date}`).then(([, d]) => { if (alive) setStateData(d); }); return () => { alive = false; }; }, [apiFetch, selectedId, date]);
 
-  useEffect(() => {
-    let alive = true;
-    const safe = async (key: string, url: string) => {
-      try { const r = await fetch(url, { cache: "no-store" }); return [key, r.ok ? await r.json() : null] as const; }
-      catch { return [key, null] as const; }
-    };
-    setLoading(true);
-    Promise.all([
-      safe("health", "/api/health"), safe("rainfall", "/api/rainfall/summary/2024-07-15"),
-      safe("risk", "/api/risk/summary/2024-07-15"), safe("events", "/api/extreme-events/summary/2024-07-15"),
-      safe("forecast", `/api/forecast/baseline?horizon=${horizon}`), safe("twin", "/api/twin/summary"),
-      safe("variables", "/api/climate/variables"), safe("models", "/api/models"),
-      safe("validation", "/api/validation"), safe("provenance", "/api/provenance"),
-      safe("prithvi", "/api/ai/prithvi/status"), safe("historical", "/api/historical/rainfall?limit=30"),
-    ]).then(entries => { if (alive) setApi(Object.fromEntries(entries)); }).finally(() => { if (alive) setLoading(false); });
-    return () => { alive = false; };
-  }, [horizon]);
+  const chooseState = useCallback((name: string) => {
+    const normalized = name.trim().toLowerCase();
+    if (normalized === "india") { setSelectedId("IN"); setSelectedName("INDIA"); setNav("Overview"); return; }
+    const id = STATE_NAMES[normalized];
+    const found = id ? { id, name } : data.hierarchy?.states_and_union_territories?.find((s: any) => s.name.toLowerCase() === normalized);
+    if (found) { setSelectedId(found.id); setSelectedName((found.name || name).toUpperCase()); setNav("Overview"); }
+    else if (normalized) setModal("location");
+  }, [data.hierarchy]);
+  const doSearch = () => { const q = search.trim().toLowerCase(); if (q === "india") chooseState("India"); else chooseState(q); setSearch(""); };
+  const runSimulation = async () => { setSimulating(true); setSimulation(null); try { const qs = new URLSearchParams({ base_date: date, precipitation_delta_pct: String(scenario.precip), temperature_delta_c: String(scenario.temp), sea_level_rise_m: String(scenario.sea), scenario: selectedName }); const r = await fetch(`/api/twin/what-if?${qs}`, { cache: "no-store" }); setSimulation(r.ok ? await r.json() : null); } catch { setSimulation(null); } finally { setSimulating(false); } };
+  const exportJSON = () => { const payload = { project: "India Climate Digital Twin", scope: "India", selected: { id: selectedId, name: selectedName }, observation_date: date, twin: selectedId === "IN" ? data.twin : stateData, risk: data.risk, forecast: data.forecast, scenario: simulation, provenance: data.provenance }; const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" }); const u = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = u; a.download = `india-climate-twin-${selectedId}-${date}.json`; a.click(); URL.revokeObjectURL(u); setModal("export"); };
+  const risk = data.risk; const rainfall = data.rainfall; const events = data.events; const twin = selectedId === "IN" ? data.twin : stateData; const forecast = data.forecast; const metrics = twin?.twin?.state_variables ?? twin?.state_variables ?? {};
+  const map = <div className="map-wrap"><ClimateMap layers={layers} date={date} onStateSelect={chooseState} onCoords={(lat, lon) => setCoords(`${lat.toFixed(4)}° N, ${lon.toFixed(4)}° E`)} zoomRequest={zoom}/><div className="map-actions"><button onClick={() => setZoom({ type: "in", nonce: Date.now() })}>+</button><button onClick={() => setZoom({ type: "out", nonce: Date.now() })}>−</button><button onClick={() => setZoom({ type: "reset", nonce: Date.now() })}>⌂</button></div><div className="map-date">OBSERVATION <b>{date}</b></div><div className="map-layers"><b>LAYERS</b>{(["satellite", "terrain", "anomalies", "risk", "events"] as const).map(k => <button key={k} onClick={() => setLayers(x => ({ ...x, [k]: !x[k] }))}>{k === "satellite" ? "RAINFALL" : k.toUpperCase()}<span className={layers[k] ? "switch on" : "switch"}/></button>)}</div><div className="map-coords">{coords}</div></div>;
 
-  const doSearch = () => {
-    const q = search.trim().toLowerCase();
-    const known: Record<string, string> = { india: "INDIA", chennai: "Tamil Nadu", "tamil nadu": "Tamil Nadu", delhi: "Delhi", mumbai: "Maharashtra", bengaluru: "Karnataka", bangalore: "Karnataka", kolkata: "West Bengal", kerala: "Kerala" };
-    if (known[q]) { setSelected(known[q]); setSide("Location"); setTop("Overview"); }
-    else if (q) setModal(`NO REGISTERED LOCATION: ${search.toUpperCase()}`);
-  };
+  let body: ReactNode;
+  if (nav === "Overview" || nav === "Digital Twin") body = <div className="dashboard"><div className="metrics"><Metric label="SELECTED ENTITY" value={selectedName}/><Metric label="TWIN STATUS" value={val(twin,["status"], data.health ? "CONNECTED" : null)}/><Metric label="OBSERVATION" value={date}/><Metric label="DATA SOURCE" value="IMD RF25"/></div>{map}<div className="bottom-grid"><Card title="WHAT NOW: CURRENT STATE"><div className="metric-grid"><Metric label="MEAN RAINFALL" value={val(rainfall,["statistics","mean_rainfall_mm"], val(metrics,["rainfall_mean_mm"]))} unit="mm"/><Metric label="MAX RAINFALL" value={val(rainfall,["statistics","maximum_rainfall_mm"], val(metrics,["rainfall_max_mm"]))} unit="mm"/><Metric label="MEAN HAZARD" value={val(risk,["statistics","mean_hazard_score"], val(metrics,["hazard_mean"]))}/><Metric label="MAX HAZARD" value={val(risk,["statistics","maximum_hazard_score"], val(metrics,["hazard_max"]))}/></div></Card><Card title="RISK DISTRIBUTION"><RiskBars risk={risk}/></Card></div></div>;
+  else if (nav === "Observations") body = <div className="two"><Card title="OBSERVATION SOURCES"><Source name="IMD RF25" value={data.rainfall ? "AVAILABLE" : "UNAVAILABLE"}/><Source name="Sentinel / Prithvi-EO" value={data.prithvi ? "SERVICE STATUS AVAILABLE" : "UNAVAILABLE"}/><Source name="Climate variable catalog" value={data.variables ? "AVAILABLE" : "UNAVAILABLE"}/></Card><Card title="PROVENANCE"><Json data={data.provenance}/></Card></div>;
+  else if (nav === "Climate") body = <div className="two"><Card title="CLIMATE VARIABLE CATALOG"><Json data={data.variables}/></Card><Card title="CURRENT RAINFALL"><Json data={rainfall}/></Card></div>;
+  else if (nav === "Forecast") body = <div className="two"><Card title="WHAT NEXT / FORECAST" action={<div className="seg">{[1,3,7,14].map(x => <button className={horizon===x?"sel":""} key={x} onClick={() => setHorizon(x)}>{x}D</button>)}</div>}><ForecastView data={forecast}/></Card><Card title="MODEL CATALOG"><Json data={data.models}/></Card></div>;
+  else if (nav === "Risk") body = <div className="risk-page"><div className="metrics"><Metric label="MEAN HAZARD SCORE" value={val(risk,["statistics","mean_hazard_score"])} /><Metric label="MAX HAZARD SCORE" value={val(risk,["statistics","maximum_hazard_score"])} /><Metric label="VALID GRID CELLS" value={val(risk,["grid","valid_points"])} /><Metric label="RISK MODEL" value={val(risk,["risk_model"], "NO DATA")}/></div>{map}<Card title="HAZARD INTELLIGENCE"><RiskBars risk={risk}/></Card></div>;
+  else if (nav === "Extreme Events") body = <div className="two"><Card title="EVENT MONITOR" action={<button className="outline" onClick={() => downloadEvents(events)}>EXPORT CSV</button>}><div className="event-kpis"><Metric label="TOTAL EXTREME POINTS" value={val(events,["summary","total_extreme_points"])} /><Metric label="HEAVY" value={val(events,["summary","heavy_points"])} /><Metric label="VERY HEAVY" value={val(events,["summary","very_heavy_points"])} /><Metric label="EXTREME" value={val(events,["summary","extremely_heavy_points"])} /></div><Json data={events}/></Card>{map}</div>;
+  else if (nav === "What-If") body = <div className="two"><Card title="FORCING PARAMETERS"><Slider label="PRECIPITATION CHANGE" value={scenario.precip} min={-100} max={300} step={1} unit="%" onChange={v=>setScenario(s=>({...s,precip:v}))}/><Slider label="TEMPERATURE CHANGE" value={scenario.temp} min={-10} max={10} step={0.5} unit="°C" onChange={v=>setScenario(s=>({...s,temp:v}))}/><Slider label="SEA LEVEL RISE" value={scenario.sea} min={0} max={2} step={0.1} unit="m" onChange={v=>setScenario(s=>({...s,sea:v}))}/><button className="primary" disabled={simulating} onClick={runSimulation}>{simulating ? "RUNNING..." : "RUN SIMULATION"}</button><p className="notice">SENSITIVITY EXPERIMENT · not a full physical multi-hazard simulation.</p></Card><Card title="SCENARIO IMPACT"><Json data={simulation}/></Card></div>;
+  else if (nav === "Historical") body = <div className="two"><Card title="HISTORICAL RAINFALL"><div className="date-row"><label>START <input type="date" value={startDate} onChange={e=>setStartDate(e.target.value)}/></label><label>END <input type="date" value={endDate} onChange={e=>setEndDate(e.target.value)}/></label><button className="primary small" onClick={refresh}>LOAD</button></div><Historical data={historical}/></Card><Card title="TIME CONTROL"><label className="timeline-label">OBSERVATION DATE <b>{date}</b><input type="date" value={date} onChange={e=>setDate(e.target.value)}/></label><div className="timeline"><span>HISTORICAL</span><span>OBSERVED</span><span>FORECAST</span></div></Card></div>;
+  else if (nav === "Validation") body = <div className="two"><Card title="MODEL & DATA VALIDATION"><Json data={data.validation}/></Card><Card title="MODEL STATUS"><Json data={data.models}/></Card></div>;
+  else if (nav === "Provenance") body = <div className="single"><Card title="DATA PROVENANCE"><Json data={data.provenance}/></Card></div>;
+  else if (nav === "System") body = <SystemPanel data={data} refreshing={refreshing} onRefresh={refresh}/>;
+  else body = <div className="single"><Card title="INDIA ADMINISTRATIVE HIERARCHY"><Hierarchy data={data.hierarchy} selected={selectedId} onSelect={id=>{setSelectedId(id); const s=data.hierarchy?.states_and_union_territories?.find((x:any)=>x.id===id); setSelectedName(s?.name?.toUpperCase() ?? "INDIA");}}/></Card></div>;
 
-  const exportState = () => {
-    const blob = new Blob([JSON.stringify({ project: "India Climate Digital Twin", selected, coords, layers, scenario, horizon, timeline, api }, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = "india-climate-twin-state.json"; a.click(); URL.revokeObjectURL(url);
-  };
-
-  const runSimulation = async () => {
-    setSimulation(true);
-    try {
-      const qs = new URLSearchParams({ base_date: "2024-07-15", precipitation_delta_pct: String(scenario.precip), temperature_delta_c: String(scenario.temp), sea_level_rise_m: String(scenario.sea), scenario: "console" });
-      const r = await fetch(`/api/scenarios/simulate?${qs.toString()}`, { cache: "no-store" });
-      const simulationData = r.ok ? await r.json() : null;
-      setApi(v => ({ ...v, simulation: simulationData }));
-    } catch { setApi(v => ({ ...v, simulation: null })); }
-  };
-
-  const map = <div className="map-wrap"><ClimateMap layers={layers} onStateSelect={setSelected} onCoords={(lat, lon) => setCoords(`${lat.toFixed(4)}° N, ${lon.toFixed(4)}° E`)} zoomRequest={zoom}/><div className="map-tools"><button onClick={() => setZoom({ type: "in", nonce: Date.now() })}>+</button><button onClick={() => setZoom({ type: "out", nonce: Date.now() })}>−</button><button onClick={() => setZoom({ type: "reset", nonce: Date.now() })}>◎</button></div><span className="coords">{coords}</span><div className="layers"><b>LAYER MANAGER</b>{(["satellite", "terrain", "anomalies", "risk", "events"] as const).map(k => <button key={k} onClick={() => setLayers(v => ({ ...v, [k]: !v[k] }))}>{k.toUpperCase()} <i className={layers[k] ? "on" : ""} /></button>)}</div></div>;
-
-  const serviceState = (key: string) => api[key] ? "CONNECTED" : "UNAVAILABLE";
-  let content: ReactNode;
-
-  if (side === "Location") content = <><div className="metrics"><Metric label="SELECTED LOCATION" value={selected}/><Metric label="API" value={serviceState("health")}/><Metric label="RAINFALL SERVICE" value={serviceState("rainfall")}/><Metric label="DATA MODE" value="LIVE API"/></div>{map}</>;
-  else if (side === "Hierarchy") content = <div className="grid"><Card title="LOCATION HIERARCHY"><p>INDIA / NATIONAL DIGITAL TWIN</p>{["INDIA", "Tamil Nadu", "Delhi", "Maharashtra", "Karnataka", "Kerala", "West Bengal"].map(x => <button className="choice" key={x} onClick={() => { setSelected(x); setSide("Location"); }}>{x}</button>)}</Card><Card title="SELECTED NODE"><Metric label="NODE" value={selected}/><Metric label="COORDINATES" value={coords}/>{map}</Card></div>;
-  else if (side === "Twin State") content = <div className="grid"><Card title="DIGITAL TWIN STATE"><p>Backend endpoint: <b>{serviceState("twin")}</b></p><JsonBlock value={api.twin}/></Card><Card title="PRITHVI WxC STATUS"><p>Model service: <b>{serviceState("prithvi")}</b></p><JsonBlock value={api.prithvi}/></Card></div>;
-  else if (side === "Details") content = <div className="grid"><Card title="CLIMATE VARIABLES"><JsonBlock value={api.variables}/></Card><Card title="RAINFALL DATASET"><JsonBlock value={api.rainfall}/></Card></div>;
-  else if (side === "Risk") content = <div className="grid"><Card title="CLIMATE RISK"><JsonBlock value={api.risk}/></Card><Card title="RISK MAP">{setLayersForRisk(setLayers)}{map}</Card></div>;
-  else content = <div className="grid"><Card title="HISTORICAL RAINFALL"><JsonBlock value={api.historical}/></Card><Card title="VALIDATION"><JsonBlock value={api.validation}/></Card></div>;
-
-  if (top === "Digital Twin") content = <div className="grid"><Card title="SCENARIO BUILDER"><label>Temperature change <b>{scenario.temp}°C</b><input type="range" min="-3" max="5" step="0.5" value={scenario.temp} onChange={e => setScenario(s => ({ ...s, temp: Number(e.target.value) }))}/></label><label>Precipitation variance <b>{scenario.precip}%</b><input type="range" min="-50" max="100" value={scenario.precip} onChange={e => setScenario(s => ({ ...s, precip: Number(e.target.value) }))}/></label><label>Sea-level rise <b>{scenario.sea}m</b><input type="range" min="0" max="1" step="0.1" value={scenario.sea} onChange={e => setScenario(s => ({ ...s, sea: Number(e.target.value) }))}/></label><button className="primary" onClick={runSimulation}>{simulation ? "SIMULATION REQUESTED" : "RUN BACKEND SIMULATION"}</button></Card><Card title="SIMULATION RESULT"><JsonBlock value={api.simulation}/></Card></div>;
-  if (top === "Earth Observation") content = <div className="grid"><Card title="DATA ASSIMILATION"><p>IMD rainfall API: <b>{serviceState("rainfall")}</b></p><p>Sentinel-2 / Prithvi-EO: <b>{serviceState("prithvi")}</b></p><p>ERA5 / climate variables: <b>{serviceState("variables")}</b></p></Card><Card title="PROVENANCE"><JsonBlock value={api.provenance}/></Card></div>;
-  if (top === "Climate") content = <div className="grid"><Card title="LIVE BASELINE FORECAST"><div className="horizon">{[1, 3, 7, 14].map(h => <button key={h} className={horizon === h ? "active" : ""} onClick={() => setHorizon(h)}>{h}D</button>)}</div><JsonBlock value={api.forecast}/></Card><Card title="MODEL CATALOGUE"><JsonBlock value={api.models}/></Card></div>;
-  if (top === "Anomalies") content = <div className="grid"><Card title="EXTREME EVENTS"><JsonBlock value={api.events}/></Card><Card title="CLIMATE RISK"><JsonBlock value={api.risk}/></Card></div>;
-
-  return <main className="shell"><style>{`.shell{height:100vh;background:#081014;color:#dbe7ed;font:14px Arial,sans-serif;display:flex;flex-direction:column;overflow:hidden}.top{height:64px;background:#141c21;border-bottom:1px solid #35434b;display:flex;align-items:center;gap:16px;padding:0 18px}.brand{font-weight:800;font-size:20px;color:#8ed5ff;white-space:nowrap}.top nav{display:flex;flex:1;height:100%}.top nav button,.actions button{background:none;border:0;color:#aebdc6;font:700 10px monospace;padding:0 10px;cursor:pointer}.top nav button.active{color:#55d9ff;border-bottom:2px solid #55d9ff}.actions{display:flex;align-items:center;gap:5px}.search{display:flex;border:1px solid #35434b}.search input{width:180px;background:none;border:0;color:white;padding:8px;outline:0}.search button{padding:8px}.work{flex:1;display:grid;grid-template-columns:220px 1fr;min-height:0}.side{background:#141c21;border-right:1px solid #35434b;display:flex;flex-direction:column}.side h3{padding:15px;margin:0;border-bottom:1px solid #35434b}.side button{border:0;background:none;color:#aebdc6;text-align:left;padding:11px 15px;font:700 10px monospace;cursor:pointer}.side button.active,.side button:hover{background:#00bfdc;color:#002f38}.side .bottom{margin-top:auto;border-top:1px solid #35434b}.main{min-width:0;display:flex;flex-direction:column}.head{padding:12px 18px;border-bottom:1px solid #35434b;display:flex;justify-content:space-between}.head h1{font-size:17px;margin:0 0 4px}.head small,.coords{font:10px monospace;color:#7e929c}.body{flex:1;overflow:auto;padding:10px}.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:#35434b}.metric{background:#151e23;padding:12px;border-bottom:2px solid #38bdf8}.metric small{display:block;color:#8fa1aa;font:9px monospace}.metric b{display:block;color:#8ed5ff;font:700 20px monospace;margin-top:4px}.map-wrap{height:calc(100vh - 185px);min-height:420px;position:relative;background:#071018}.climate-map{position:absolute;inset:0}.map-tools{position:absolute;top:12px;left:12px;z-index:5;display:flex;flex-direction:column}.map-tools button{width:32px;height:32px;background:#111a20;border:1px solid #35434b;color:white;cursor:pointer}.coords{position:absolute;bottom:8px;left:8px;background:#111a20dd;padding:6px;z-index:5}.layers{position:absolute;top:12px;right:12px;z-index:5;width:170px;background:#10191eea;border:1px solid #35434b;padding:10px}.layers b{display:block;font:9px monospace;margin-bottom:5px}.layers button{display:flex;justify-content:space-between;width:100%;border:0;background:none;color:#b7c6cd;padding:6px;font:9px monospace;cursor:pointer}.layers i{width:22px;height:11px;background:#34434b;border-radius:8px}.layers i.on{background:#38bdf8}.grid{display:grid;grid-template-columns:2fr 1fr;gap:10px}.card{background:#111a20;border:1px solid #35434b;min-width:0}.card>header{padding:10px;border-bottom:1px solid #35434b;font:700 10px monospace}.card-body{padding:14px}.card p{color:#9db0ba;font-size:12px;line-height:1.6}.card label{display:block;margin-bottom:20px;font:11px monospace}.card label b{float:right;color:#55d9ff}.card input{display:block;width:100%;margin-top:9px}.primary{background:#38bdf8;border:0;color:#002f38;padding:9px 14px;font:700 10px monospace;cursor:pointer}.json{max-height:520px;overflow:auto;background:#091219;border:1px solid #27353d;padding:10px;color:#9ddcff;font:10px monospace;white-space:pre-wrap}.choice{display:block;width:100%;margin:4px 0;background:#10191e;border:1px solid #35434b;color:#b9c8cf;padding:8px;text-align:left;cursor:pointer;font:10px monospace}.choice:hover{background:#00bfdc;color:#002f38}.horizon{display:flex;gap:4px;margin-bottom:10px}.horizon button{background:#10191e;border:1px solid #35434b;color:#aebdc6;padding:7px 12px;cursor:pointer;font:10px monospace}.horizon button.active{background:#38bdf8;color:#002f38}.tmodal{position:fixed;inset:0;background:#000b;display:grid;place-items:center;z-index:20}.tmodal>div{background:#111a20;border:1px solid #35434b;padding:20px;width:360px}.tmodal button{float:right;background:none;border:0;color:white}.timeline{height:45px;border-top:1px solid #35434b;padding:8px 15px;display:flex;gap:10px;align-items:center}.timeline input{flex:1}.loading{color:#55d9ff;font:10px monospace}@media(max-width:900px){.top nav{display:none}.work{grid-template-columns:170px 1fr}.grid{grid-template-columns:1fr}.layers{display:none}}`}</style><header className="top"><div className="brand">INDIA CLIMATE TWIN</div><nav>{TOP.map(t => <button key={t} className={top === t ? "active" : ""} onClick={() => setTop(t)}>{t.toUpperCase()}</button>)}</nav><div className="actions"><div className="search"><input value={search} onChange={e => setSearch(e.target.value)} onKeyDown={e => e.key === "Enter" && doSearch()} placeholder="Search location"/><button onClick={doSearch}>⌕</button></div><button onClick={() => setModal("SYSTEM STATUS")}>●</button><button onClick={() => setModal("SETTINGS")}>⚙</button></div></header><div className="work"><aside className="side"><h3>WORKSPACE<br/><small>NATIONAL CLIMATE OPERATIONS</small></h3>{SIDE.map(s => <button key={s} className={side === s ? "active" : ""} onClick={() => setSide(s)}>{s.toUpperCase()}</button>)}<div className="bottom"><button onClick={exportState}>EXPORT STATE</button><button onClick={() => setModal("DATA SOURCES")}>DATA SOURCES</button></div></aside><section className="main"><header className="head"><div><h1>{top} / {side}</h1><small>{selected} · {coords} · {loading ? "SYNCING API" : "LIVE API"}</small></div><b style={{color:"#55d9ff",font:"10px monospace"}}>● SYSTEM OPERATIONAL</b></header><div className="body">{content}</div>{(top === "Overview" || top === "Digital Twin") && <footer className="timeline"><button onClick={() => setPlaying(v => !v)}>{playing ? "❚❚" : "▶"}</button><span>SIMULATION TIME</span><input type="range" min="0" max="99" value={timeline} onChange={e => setTimeline(Number(e.target.value))}/><b>{timeline}%</b></footer>}</section></div>{modal && <div className="tmodal" onClick={e => e.target === e.currentTarget && setModal(null)}><div><button onClick={() => setModal(null)}>×</button><h3>{modal}</h3><p>Frontend is connected to the deployed FastAPI service through the Next.js API proxy.</p><p>Unavailable scientific datasets are shown as unavailable instead of fabricated values.</p></div></div>}</main>;
+  return <main className="app"><header className="topbar"><div className="brand"><span>🇮🇳</span><div><b>INDIA CLIMATE DIGITAL TWIN</b><small>NATIONAL CLIMATE INTELLIGENCE CORE</small></div></div><div className="sync"><span className="pulse"/> {refreshing ? "SYNCHRONIZING" : "SYSTEM ONLINE"}</div><div className="search"><input value={search} onChange={e=>setSearch(e.target.value)} onKeyDown={e=>e.key==='Enter'&&doSearch()} placeholder="Search India / state"/><button onClick={doSearch}>⌕</button></div><button className="icon" title="Synchronize" onClick={refresh}>↻</button><button className="icon" title="Notifications" onClick={()=>setModal("notifications")}>♢</button><button className="icon" title="System profile" onClick={()=>setModal("account")}>◯</button></header><div className="layout"><aside className="rail"><div className="rail-title">OPERATIONS</div>{NAV.map(([icon,label])=><button key={label} className={nav===label?"active":""} onClick={()=>setNav(label)}><span>{icon}</span>{label}</button>)}<div className="rail-bottom"><button onClick={exportJSON}>⇩ EXPORT STATE</button></div></aside><section className="content"><div className="page-head"><div><div className="crumb">INDIA / {selectedName}</div><h1>{nav === "What-If" ? "WHAT IF / SCENARIO LAB" : nav.toUpperCase()}</h1><p>India-scoped digital twin operations · observed state · forecast · risk intelligence</p></div><div className="head-actions"><label>DATE <input type="date" value={date} onChange={e=>setDate(e.target.value)}/></label><Status ok={!!data.health} text={data.health ? "API CONNECTED" : "API UNAVAILABLE"}/></div></div><div className="body">{loading && !data.health ? <div className="loading">LOADING INDIA CLIMATE STATE…</div> : body}</div></section></div>{modal&&<Modal type={modal} onClose={()=>setModal(null)} data={data} onExport={exportJSON}/>}</main>;
 }
 
-function setLayersForRisk(setLayers: Dispatch<SetStateAction<LayerState>>) {
-  return <button className="primary" onClick={() => setLayers(v => ({ ...v, risk: !v.risk }))}>{"TOGGLE RISK LAYER"}</button>;
-}
+function RiskBars({risk}:{risk:any}){const d=risk?.risk_distribution;if(!d)return <div className="empty">NO DATA</div>;const total=Object.values(d).reduce((a:any,b:any)=>a+(Number(b)||0),0)||1;return <div className="bars">{(["low","moderate","high","extreme"] as const).map(k=><div className="bar" key={k}><span>{k.toUpperCase()}</span><div><i style={{width:`${(Number(d[k]||0)/total)*100}%`}}/></div><b>{d[k]??0}</b></div>)}</div>}
+function Source({name,value}:{name:string;value:string}){return <div className="source"><span>{name}</span><Status ok={value!=="UNAVAILABLE"} text={value}/></div>}
+function Slider({label,value,min,max,step,unit,onChange}:{label:string;value:number;min:number;max:number;step:number;unit:string;onChange:(v:number)=>void}){return <label className="slider"><span>{label}<b>{value}{unit}</b></span><input type="range" min={min} max={max} step={step} value={value} onChange={e=>onChange(Number(e.target.value))}/></label>}
+function ForecastView({data}:{data:any}){if(!data)return <div className="empty">NO DATA / SERVICE UNAVAILABLE</div>;return <div><div className="forecast-meta"><span>MODEL <b>{data.model??data.method??"BASELINE"}</b></span><span>HORIZON <b>{data.horizon??"—"}</b></span></div><Json data={data}/></div>}
+function Historical({data}:{data:any}){if(!data)return <div className="empty">NO DATA / SERVICE UNAVAILABLE</div>;return Array.isArray(data)?<div className="history-list">{data.slice(0,30).map((x:any,i:number)=><div key={i}><span>{x.date??x.TIME??"—"}</span><b>{x.rainfall_mm??x.value??"NO DATA"}</b></div>)}</div>:<Json data={data}/>}
+function Hierarchy({data,selected,onSelect}:{data:any;selected:string;onSelect:(id:string)=>void}){return <div className="hierarchy"><button className={selected==="IN"?"node active":"node"} onClick={()=>onSelect("IN")}>🇮🇳 INDIA</button>{data?.states_and_union_territories?.map((s:any)=><button className={selected===s.id?"node active":"node"} key={s.id} onClick={()=>onSelect(s.id)}>{s.name}<small>{s.id}</small></button>)}</div>}
+function SystemPanel({data,refreshing,onRefresh}:{data:any;refreshing:boolean;onRefresh:()=>void}){const items=[["API",data.health],["IMD RF25",data.rainfall],["Risk Engine",data.risk],["Extreme Events",data.events],["Twin Engine",data.twin],["Forecast",data.forecast],["Prithvi WxC",data.prithvi],["Validation",data.validation]];return <div className="system-grid"><Card title="SYSTEM DIAGNOSTICS" action={<button className="outline" onClick={onRefresh}>{refreshing?"SYNCING":"REFRESH"}</button>}>{items.map(([n,v])=><div className="service" key={n as string}><span>{n}</span><Status ok={!!v}/></div>)}</Card><Card title="DIGITAL TWIN HEALTH"><Json data={data.twin}/></Card></div>}
+function Modal({type,onClose,data,onExport}:{type:Modal;onClose:()=>void;data:any;onExport:()=>void}){return <div className="modal-bg" onClick={onClose}><div className="modal" onClick={e=>e.stopPropagation()}><button className="close" onClick={onClose}>×</button>{type==="notifications"?<><h2>ACTIVE BULLETINS</h2><p>Derived from connected risk and extreme-event services.</p><Status ok={!!data.events} text={data.events?`${data.events.summary?.total_extreme_points??0} EXTREME POINTS`:"NO EVENT DATA"}/><Json data={data.events}/></>:type==="account"?<><h2>SYSTEM PROFILE</h2><p>INDIA CLIMATE DIGITAL TWIN</p><p>Scope: INDIA</p><p>Frontend: Next.js / MapLibre</p><p>Backend: FastAPI</p><Status ok={!!data.health}/></>:<><h2>EXPORT READY</h2><p>The current synchronized twin payload was exported as JSON.</p><button className="primary" onClick={onExport}>EXPORT AGAIN</button></>}</div></div>}
+function downloadEvents(events:any){if(!events?.summary)return;const rows=["date,total_extreme_points,heavy_points,very_heavy_points,extremely_heavy_points,maximum_rainfall_mm",`${events.date},${events.summary.total_extreme_points??""},${events.summary.heavy_points??""},${events.summary.very_heavy_points??""},${events.summary.extremely_heavy_points??""},${events.summary.maximum_rainfall_mm??""}`];const b=new Blob([rows.join("\n")],{type:"text/csv"});const u=URL.createObjectURL(b);const a=document.createElement("a");a.href=u;a.download=`extreme-events-${events.date}.csv`;a.click();URL.revokeObjectURL(u)}
