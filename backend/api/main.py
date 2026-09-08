@@ -21,8 +21,11 @@ from backend.services.twin_engine import build_twin_snapshot, build_what_next, b
 from backend.services.india_hierarchy_service import get_india_hierarchy, resolve_location
 from backend.services.state_twin_service import get_all_state_climate_metrics, get_state_climate_metrics, get_state_twin
 from backend.services.prithvi_wxc_service import get_prithvi_wxc_status, validate_prithvi_inputs, run_local_inference
+from backend.services.climate_state_service import build_climate_state, discover_variable
+from backend.services.multi_hazard_service import calculate_hazards
+from backend.services.admin_data_service import get_districts, get_cities, resolve_admin
 
-app = FastAPI(title="India Climate Digital Twin API", description="Operational scientific API for the India Climate Digital Twin.", version="0.8.0")
+app = FastAPI(title="India Climate Digital Twin API", description="Operational scientific API for the India Climate Digital Twin.", version="0.9.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
 
@@ -41,7 +44,7 @@ def _call(function, *args, **kwargs):
 
 @app.get("/")
 def root():
-    return {"project": "India Climate Digital Twin", "status": "online", "engine": "Python + FastAPI + India Climate Twin Core", "version": "0.8.0"}
+    return {"project": "India Climate Digital Twin", "status": "online", "engine": "Python + FastAPI + India Climate Twin Core", "version": "0.9.0"}
 
 @app.get("/api/status")
 def status(): return get_system_health()
@@ -63,6 +66,28 @@ def india_states_climate(date: str): return _call(get_all_state_climate_metrics,
 def india_state_climate(state_id: str, date: str): return _call(get_state_climate_metrics, date, state_id)
 @app.get("/api/india/state/{state_id}/twin/{date}")
 def india_state_twin(state_id: str, date: str): return _call(get_state_twin, date, state_id)
+
+# -------------------- DISTRICT / CITY --------------------
+@app.get("/api/india/districts")
+def india_districts(): return get_districts()
+@app.get("/api/india/cities")
+def india_cities(): return get_cities()
+@app.get("/api/india/district/{admin_id}")
+def india_district(admin_id: str): return resolve_admin("district", admin_id)
+@app.get("/api/india/city/{admin_id}")
+def india_city(admin_id: str): return resolve_admin("city", admin_id)
+
+# -------------------- MULTI-VARIABLE TWIN STATE --------------------
+@app.get("/api/twin/climate-state")
+def climate_state(date: str | None = Query(default=None)): return _call(build_climate_state, date)
+@app.get("/api/twin/climate-state/{variable}")
+def climate_variable_state(variable: str, date: str | None = Query(default=None)):
+    state = _call(build_climate_state, date)
+    return {"state": state, "variable_discovery": discover_variable(variable)}
+@app.get("/api/twin/multi-hazard")
+def multi_hazard(date: str | None = Query(default=None)):
+    state = _call(build_climate_state, date)
+    return calculate_hazards(state)
 
 # -------------------- RAINFALL --------------------
 @app.get("/api/rainfall/info")
