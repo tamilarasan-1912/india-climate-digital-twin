@@ -16,27 +16,41 @@ from backend.services.climate_state_service import build_climate_state, discover
 from backend.services.multi_hazard_service import calculate_hazards
 from backend.services.admin_data_service import get_districts, get_cities, resolve_admin
 from backend.services.synchronization_service import synchronize
+from backend.services.data_catalog_service import get_data_catalog
+from backend.services.data_quality_service import validate_observation
 
-app = FastAPI(title="India Climate Digital Twin API", description="Operational scientific API for the India Climate Digital Twin.", version="0.9.1")
+app = FastAPI(title="India Climate Digital Twin API", description="Operational scientific API for the India Climate Digital Twin.", version="0.9.2")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
 
 def _call(function, *args, **kwargs):
     try:
         return function(*args, **kwargs)
-    except ValueError as error: raise HTTPException(status_code=400, detail=str(error)) from error
-    except FileNotFoundError as error: raise HTTPException(status_code=503, detail=str(error)) from error
-    except RuntimeError as error: raise HTTPException(status_code=503, detail=str(error)) from error
-    except Exception as error: raise HTTPException(status_code=500, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    except FileNotFoundError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
+    except RuntimeError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
+    except Exception as error:
+        raise HTTPException(status_code=500, detail=str(error)) from error
+
 
 @app.get("/")
-def root(): return {"project": "India Climate Digital Twin", "status": "online", "engine": "Python + FastAPI + India Climate Twin Core", "version": "0.9.1"}
+def root():
+    return {"project": "India Climate Digital Twin", "status": "online", "engine": "Python + FastAPI + India Climate Twin Core", "version": "0.9.2"}
+
 @app.get("/api/status")
 def status(): return get_system_health()
 @app.get("/api/health")
 def health(): return get_system_health()
 @app.get("/api/climate/variables")
 def climate_variables(): return {"variables": CLIMATE_VARIABLES}
+
+@app.get("/api/data/catalog")
+def data_catalog(): return get_data_catalog()
+@app.post("/api/data/validate")
+def data_validate(record: dict[str, object]): return validate_observation(record)
 
 @app.get("/api/india/hierarchy")
 def india_hierarchy(): return get_india_hierarchy()
