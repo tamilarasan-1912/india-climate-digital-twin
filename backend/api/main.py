@@ -1,7 +1,11 @@
 from __future__ import annotations
 
-from fastapi import FastAPI, HTTPException, Query
+import os
+
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import Response
 
 from backend.config.climate_config import CLIMATE_VARIABLES
 from backend.services.rainfall_service import get_dataset_info, get_daily_statistics, get_india_daily_summary, get_daily_rainfall, get_rainfall_grid, get_rainfall_grid_info
@@ -21,9 +25,31 @@ from backend.services.data_quality_service import validate_observation
 from backend.api.prithvi_routes import router as prithvi_contract_router
 from backend.api.governance_routes import router as governance_router
 from backend.api.verified_data_routes import router as verified_data_router
+from backend.services.operations_hardening_service import REQUEST_ID_HEADER, request_id, security_headers
 
-app = FastAPI(title="India Climate Digital Twin API", description="Operational scientific API for the India Climate Digital Twin.", version="0.9.5")
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
+app = FastAPI(title="India Climate Digital Twin API", description="Operational scientific API for the India Climate Digital Twin.", version="0.9.6")
+
+_raw_origins = os.getenv("FRONTEND_ORIGIN", "").strip()
+if not _raw_origins:
+    # Development fallback only. Production should set an explicit origin list.
+    allow_origins = ["http://localhost:3000", "http://127.0.0.1:3000"]
+else:
+    allow_origins = [origin.strip() for origin in _raw_origins.split(",") if origin.strip()]
+
+app.add_middleware(CORSMiddleware, allow_origins=allow_origins, allow_credentials=True, allow_methods=["GET", "POST", "OPTIONS"], allow_headers=["Content-Type", "Authorization", "X-API-Key", REQUEST_ID_HEADER])
+
+
+class OperationalHeadersMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        rid = request_id(request.headers.get(REQUEST_ID_HEADER))
+        response: Response = await call_next(request)
+        response.headers[REQUEST_ID_HEADER] = rid
+        for key, value in security_headers().items():
+            response.headers[key] = value
+        return response
+
+
+app.add_middleware(OperationalHeadersMiddleware)
 app.include_router(prithvi_contract_router)
 app.include_router(governance_router)
 app.include_router(verified_data_router)
@@ -44,7 +70,7 @@ def _call(function, *args, **kwargs):
 
 @app.get("/")
 def root():
-    return {"project": "India Climate Digital Twin", "status": "online", "engine": "Python + FastAPI + India Climate Twin Core", "version": "0.9.5"}
+    return {"project": "India Climate Digital Twin", "status": "online", "engine": "Python + FastAPI + India Climate Twin Core", "version": "0.9.6"}
 
 @app.get("/api/status")
 def status(): return get_system_health()
