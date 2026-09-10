@@ -11,6 +11,7 @@ const nextConfig: NextConfig = {
   },
   async rewrites() {
     return [
+      // Core climate/twin APIs
       { source: "/api/rainfall/:path*", destination: `${API}/api/rainfall/:path*` },
       { source: "/api/climate/:path*", destination: `${API}/api/climate/:path*` },
       { source: "/api/extreme-events/:path*", destination: `${API}/api/extreme-events/:path*` },
@@ -26,6 +27,10 @@ const nextConfig: NextConfig = {
       { source: "/api/provenance", destination: `${API}/api/provenance` },
       { source: "/api/health", destination: `${API}/api/health` },
       { source: "/api/status", destination: `${API}/api/status` },
+      // India administrative and data-governance APIs
+      { source: "/api/india/:path*", destination: `${API}/api/india/:path*` },
+      { source: "/api/data/:path*", destination: `${API}/api/data/:path*` },
+      { source: "/api/governance/:path*", destination: `${API}/api/governance/:path*` },
     ];
   },
 };
