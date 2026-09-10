@@ -43,5 +43,13 @@ def governance_audit(
 ):
     identity = _identity(x_api_key)
     _require(identity, "manage")
-    audit_event(action="audit.read", resource="audit_events", actor_role=identity.get("role"), request_id=request.headers.get("X-Request-ID"), source_ip=request.client.host if request.client else None, details={"limit": limit})
-    return {"events": recent_audit_events(limit), "count": len(recent_audit_events(limit))}
+    events = recent_audit_events(limit)
+    audit_event(
+        action="audit.read",
+        resource="audit_events",
+        actor_role=identity.get("role"),
+        request_id=request.headers.get("X-Request-ID"),
+        source_ip=request.client.host if request.client else None,
+        details={"limit": limit},
+    )
+    return {"events": events, "count": len(events)}
