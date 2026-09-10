@@ -4,6 +4,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Header, HTTPException, Query, Request
 
 from backend.services.governance_service import authenticate, audit_event, can, recent_audit_events, security_status
+from backend.services.operations_service import get_operations_status
 
 router = APIRouter(prefix="/api/governance", tags=["Government Governance"])
 
@@ -53,3 +54,22 @@ def governance_audit(
         details={"limit": limit},
     )
     return {"events": events, "count": len(events)}
+
+
+@router.get("/operations")
+def governance_operations(
+    request: Request,
+    x_api_key: str | None = Header(default=None, alias="X-API-Key"),
+):
+    identity = _identity(x_api_key)
+    _require(identity, "read")
+    result = get_operations_status()
+    audit_event(
+        action="operations.read",
+        resource="national_operations_status",
+        actor_role=identity.get("role"),
+        request_id=request.headers.get("X-Request-ID"),
+        source_ip=request.client.host if request.client else None,
+        details={"overall_status": result["overall_status"]},
+    )
+    return result
