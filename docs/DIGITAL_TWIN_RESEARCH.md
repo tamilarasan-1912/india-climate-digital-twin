@@ -1,106 +1,213 @@
-# Digital Twin Research and Implementation
+# Digital Twin Research and Implementation Basis
 
-## 1. What a digital twin is
+## 1. Research conclusion
 
-The project follows the Earth-system interpretation of a digital twin rather than treating a dashboard or a prediction model as the twin itself.
+A Digital Twin is more than a dashboard, GIS, simulation or ML predictor. NIST defines a Digital Twin as a virtual representation of a real-world entity and its current guidance emphasizes dynamic connection/synchronization, state representation, prediction, simulation and decision support. NIST also notes that Digital Twins expose states and transitions between states and require trust/security considerations.
 
-A useful operational pattern is:
+For this repository, the represented entity is **India's climate/weather/environmental state**. The system boundary is India; global Earth-system programmes are references rather than the project's scope.
 
-**Observed Earth system -> data ingestion -> synchronized digital state -> models -> forecast / impact assessment -> what-if scenarios -> decision support**
+The operational lifecycle is:
 
-NIST describes a digital twin as a virtual representation of a real-world entity and emphasizes dynamic representation, connection and synchronization, forecasting, simulation, monitoring, diagnosis and decision support. NASA's Earth System Digital Twin work describes three major capabilities: a continuously updated digital replica, dynamic forecasting models, and impact assessment. Destination Earth uses the closely related **What Now / What Next / What If** pattern for Earth-system digital twins.
+**Real-world observations → ingestion/QC → synchronized India digital state → analysis/modeling → forecast/risk → what-if experimentation → decision support → next state update**
 
-For this project, the physical counterpart is the climate/weather state over India. There is no physical actuator to control; the feedback loop is therefore observational and analytical: new observations update the digital state, models operate on that state, and scenario/impact results support human decisions.
+This is the central architectural criterion used when deciding whether a feature is a Digital Twin capability or merely a supporting visualization/model.
 
-## 2. Requirements derived from the research
+## 2. Digital Twin versus adjacent technologies
 
-| Digital-twin requirement | Project implementation |
-|---|---|
-| Real-world counterpart | India climate/weather system represented by gridded observations and reanalysis |
-| Continuous or repeatable synchronization | `twin_engine.build_twin_snapshot()` derives the state directly from the current source dataset |
-| Digital state | Observation-derived state vector plus rainfall/risk state |
-| Provenance | Source dataset, variable, model and state hash are returned by the API |
-| What Now | `/api/twin/now` |
-| What Next | `/api/twin/next` |
-| What If | `/api/twin/what-if` and `/api/scenarios/simulate` |
-| Forecasting | Validated 7-day moving-average rainfall baseline; Prithvi-WxC remains gated by its input contract |
-| Impact/risk assessment | Rainfall Hazard Index and spatial risk grid |
-| Validation | Walk-forward baseline metrics and risk-engine checks |
-| Interoperability | JSON APIs and GeoJSON spatial layers |
-| Trust | Explicit data availability, model status and limitations; no fabricated missing variables |
+| Technology | What it does | Role here |
+|---|---|---|
+| GIS | Represents geographic entities/layers | Visualization and spatial interaction |
+| Dashboard | Presents information | User interface |
+| Data lake/store | Stores data | Infrastructure |
+| Simulation | Computes hypothetical system behavior | Scenario component |
+| Forecast model | Predicts future values | Twin modeling component |
+| ML predictor | Learns statistical relationships | Modeling component |
+| Digital shadow | Digital state updated primarily one-way from the physical system | Partial precursor |
+| Digital Twin | Maintains a connected, synchronized digital representation and uses it for prediction/simulation/decision support | Overall system architecture |
 
-## 3. Current twin state construction
+The project must therefore preserve the connection between source observations, the represented state, model outputs and subsequent state updates.
 
-The current operational state is intentionally deterministic and auditable. For a selected observation date it contains:
+## 3. International systems studied
 
-- India-wide rainfall minimum, median, mean and maximum.
-- 7-day rolling rainfall mean.
-- 30-day rainfall anomaly and anomaly z-score when sufficient history exists.
-- Spatial rainfall hazard mean and maximum.
-- Spatial risk distribution.
-- Maximum-risk location from the rainfall hazard grid.
-- A compact state vector containing those variables.
-- A SHA-256-derived state hash so the same source state can be reproduced and identified.
+### NIST
 
-This is a **data-driven state representation**, not a claim that the vector is a learned neural latent representation.
+NIST's Digital Twin work is useful for the core concepts: real-world counterpart, dynamic representation, synchronization, state/transition visibility, modeling and simulation, forecasting, decision support, interoperability and trust.
 
-## 4. Forecasting layer
+### Destination Earth / ECMWF
 
-The forecast layer uses the existing walk-forward-validated 7-day moving-average baseline. It only uses observations up to the forecast origin and never uses future observations. This provides a reproducible benchmark while the Prithvi-WxC integration is being completed.
+Destination Earth is substantially larger than this project, but its architecture provides reusable patterns: observations plus models, high-resolution simulation, extreme-event workflows and interactive **What Now / What Next / What If** reasoning. ECMWF describes its Extremes Digital Twin as combining Earth-system models, impact-sector models and observations and supporting tailored simulations and what-if scenarios.
 
-Prithvi-WxC is not substituted with fabricated data. Its official input contract requires compatible multi-variable atmospheric fields, so the model is only exposed when that contract is satisfied.
+The reusable lesson is architectural, not a claim that this repository matches DestinE's global scope or supercomputing capability.
 
-## 5. What-if layer
+## 4. India-specific climate representation
 
-The scenario engine perturbs rainfall and recomputes the rainfall hazard field. Temperature and sea-level parameters are accepted and recorded but are not silently converted into fake physical impacts. They remain explicitly marked as uncoupled until validated temperature and coastal/flood models are added.
+India's climate twin should be multi-variable over time and space. Relevant state dimensions include precipitation, temperature, humidity, wind, pressure, soil moisture, evapotranspiration, vegetation/land surface, ocean/coastal conditions and event indicators, subject to actual data availability.
 
-This makes the current scenario a **rainfall-hazard sensitivity experiment**, not a physical flood or climate-impact simulation.
+The first connected national variable is IMD gridded rainfall. This provides a concrete, validated spatial state from which rainfall anomalies, extremes and hazard indicators can be derived.
 
-## 6. Architecture
+Indian Earth-observation integration is represented through the ISRO/MOSDAC provider boundary. MOSDAC is an ISRO Space Applications Centre data centre that receives, processes and disseminates meteorological and oceanographic satellite data. Product-specific integration remains gated by data access, metadata and validation rather than being fabricated.
+
+## 5. Current repository architecture audit
+
+The repository currently contains:
+
+- Next.js/React + MapLibre frontend;
+- FastAPI backend;
+- Xarray/NumPy/pandas scientific processing;
+- IMD RF25 rainfall dataset and rainfall services;
+- rainfall hazard/risk and extreme-event services;
+- India administrative hierarchy;
+- twin engine with synchronized observation-derived state;
+- baseline forecast service and walk-forward validation;
+- scenario engine;
+- provenance/model/validation APIs;
+- Sentinel-2/Prithvi-EO research pipeline for Chennai;
+- MERRA-2/Prithvi-WxC contract/status layer;
+- Vercel/Render deployment configuration and CI.
+
+### What is already Digital Twin functionality
+
+- reproducible observation-derived twin state;
+- synchronization metadata and state hash;
+- source/model provenance;
+- national/state location context;
+- state → forecast/risk/scenario relationship;
+- repeatable state regeneration from observations.
+
+### What remains ordinary supporting functionality
+
+- MapLibre map rendering is GIS/visualization;
+- charts are visualization;
+- IMD rainfall is an observation source;
+- the moving-average forecast is a model;
+- risk scoring is an impact/risk model;
+- Sentinel-2/Prithvi-EO inference is an EO modeling component.
+
+They become part of the Digital Twin only when they operate on, update or inform the synchronized twin state.
+
+## 6. Main gaps identified
+
+1. Continuous multi-source ingestion is not yet operational.
+2. The national state is strongest for rainfall; many atmospheric/environmental variables remain planned or dataset-gated.
+3. Formal data assimilation is not yet implemented.
+4. Probabilistic uncertainty/calibration is incomplete.
+5. Temperature, hydrology/flood, drought, coastal and cyclone models require validated datasets and methods before activation.
+6. Prithvi-WxC inference requires the official multi-variable MERRA-2 contract and substantial compute/storage.
+7. The Chennai EO research subset is not equivalent to an India-wide EO state.
+8. Persistent time-series/object storage and scheduled ingestion need to mature for production scale.
+9. State/district aggregation must always use validated geometry/data and must never infer missing administrative metrics from national aggregates.
+
+## 7. Target India Climate Digital Twin
 
 ```text
-                 OBSERVATIONS / REANALYSIS
-                 IMD RF25 | ERA5 | Sentinel-2
-                           |
-                           v
-                 +-----------------------+
-                 | Data validation / QC   |
-                 +-----------------------+
-                           |
-                           v
-                 +-----------------------+
-                 | DIGITAL TWIN STATE     |
-                 | now + provenance       |
-                 +-----------------------+
-                    /          |          \
-                   /           |           \
-                  v            v            v
-             Risk engine   Forecast      EO features
-                  |            |            |
-                  +------------+------------+
-                               |
-                               v
-                     WHAT-NEXT / WHAT-IF
-                               |
-                               v
-                     Dashboard / decisions
+REAL-WORLD INDIA
+      │
+      ├── IMD / station observations
+      ├── ISRO / MOSDAC / satellite observations
+      ├── ERA5 / reanalysis
+      ├── authoritative forecast products
+      └── environmental datasets
+      │
+      ▼
+INGESTION + QC + NORMALIZATION + PROVENANCE
+      │
+      ▼
+INDIA DIGITAL TWIN STATE
+      │
+      ├── spatial location/grid
+      ├── timestamp
+      ├── variable/value
+      ├── source/model
+      ├── quality/freshness
+      └── uncertainty/confidence when available
+      │
+      ├────────────┬─────────────┬───────────────┐
+      ▼            ▼             ▼               ▼
+STATE ESTIMATION FORECASTING   EXTREMES       SCENARIOS
+      │            │             │               │
+      └────────────┴─────────────┴───────────────┘
+                           │
+                           ▼
+                    RISK / DECISION SUPPORT
+                           │
+                           ▼
+                     MAP + API + UI
 ```
 
-## 7. Research sources
+## 8. Model strategy
+
+The project should not choose the most complicated model by default. The recommended progression is:
+
+1. Strong statistical baseline.
+2. Tree/time-series ML when sufficient features/history exist.
+3. Spatial-temporal deep learning when enough gridded training data exists.
+4. Prithvi-WxC for multi-variable weather/climate forecasting after its official input contract is satisfied.
+5. Prithvi-EO for satellite/EO representation and downstream tasks.
+6. Authoritative external event forecasts where independently recreating an operational meteorological model is not scientifically justified.
+
+Model comparison should use temporal holdout or rolling evaluation. Continuous outputs should use MAE/RMSE/bias and, where useful, probabilistic scores. Event models should use precision/recall/F1, PR-AUC/ROC-AUC and calibration where the labelled sample supports them.
+
+## 9. State contract
+
+The conceptual twin-state record is:
+
+```text
+location_id
+latitude / longitude
+administrative level and ID
+timestamp
+variable
+observed value
+estimated value
+forecast value
+unit
+anomaly
+uncertainty
+confidence
+source
+model
+quality flag
+last updated
+provenance ID
+```
+
+A field is omitted or explicitly marked unavailable when its source does not support it. The API must never invent uncertainty or confidence.
+
+## 10. Scenario semantics
+
+The UI and API must distinguish three categories:
+
+- **Observed:** derived from source observations.
+- **Forecast:** generated by a predictive model from a forecast origin.
+- **Scenario:** hypothetical input perturbation or simulation.
+
+The current What-If engine is a rainfall-hazard sensitivity experiment. Temperature and sea-level inputs are recorded but not coupled to physical impacts until validated datasets/models exist.
+
+## 11. Verification standard
+
+Before enabling a new capability in the operational UI:
+
+- validate its source and units;
+- validate spatial and temporal coverage;
+- check missing/stale data;
+- perform temporal evaluation without future leakage;
+- expose model identity and forecast origin;
+- expose uncertainty/calibration status when available;
+- test API failure/invalid-input paths;
+- distinguish authoritative external products from project-generated predictions.
+
+## 12. References
 
 - NIST Digital Twins: https://www.nist.gov/digital-twins
+- NIST Definitions and State of the Art: https://www.nist.gov/digital-twins/definitions-and-state-art
 - NIST Essential Elements: https://www.nist.gov/digital-twins/essential-elements
 - NIST Digital Twin Core Conceptual Models and Services: https://www.nist.gov/publications/digital-twin-core-conceptual-models-and-services
 - NIST IR 8356: https://csrc.nist.gov/pubs/ir/8356/final
-- ISO 23247-1:2021: https://www.iso.org/standard/75066.html
-- NASA Earth Systems Digital Twins: https://esto.nasa.gov/earth-system-digital-twin/
-- NASA ESDT technical report: https://ntrs.nasa.gov/citations/20240000303
-- Destination Earth Digital Twins: https://destination-earth.eu/destination-earth/destines-components/digital-twins-digital-twin-engine/
-- Destination Earth Digital Twin FAQ: https://destination-earth.eu/faq/what-are-destines-digital-twins/
-- Destination Earth Climate Adaptation Digital Twin: https://destination-earth.eu/faq/what-is-the-climate-change-adaptation-digital-twin/
+- ECMWF Extremes Digital Twin: https://www.ecmwf.int/en/forecasts/datasets/weather-induced-extremes-digital-twin-extremes-dt
+- ECMWF Climate Change Adaptation Digital Twin: https://www.ecmwf.int/en/forecasts/dataset/destination-earth-digital-twin-climate-change-adaptation
+- Destination Earth Digital Twins: https://destine.ecmwf.int/digital-twins/
+- MOSDAC / ISRO: https://mosdac.gov.in/
 
-## 8. Important scope statement
+## 13. Implementation status
 
-A production national Earth-system digital twin requires substantially more than this repository currently contains: continuous multi-source ingestion, multi-variable atmospheric/ocean/land observations, data assimilation, calibrated numerical/AI forecasting, sectoral impact models, uncertainty quantification, high-performance computing and operational data infrastructure.
-
-The implementation in this repository therefore provides a **working, auditable climate digital-twin core** around the datasets and models that are actually available. It does not claim that the project is already equivalent in resolution, coverage, compute or scientific fidelity to NASA ESDT or Destination Earth.
+This repository is an **India Climate Digital Twin core**, not a claim of being a full national operational Earth-system twin. The architecture is intentionally extensible: new validated variables/providers/models can update the same twin-state contract without replacing the existing rainfall/risk/forecast foundation.

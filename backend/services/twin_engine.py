@@ -1,13 +1,14 @@
-"""Climate digital-twin engine.
+"""India Climate Digital Twin state engine.
 
-The engine follows the Earth-system digital-twin pattern:
-1. What-now: derive a synchronized state from observations.
+The engine applies Digital Twin patterns to India's represented climate state:
+1. What-now: derive a synchronized state from validated observations.
 2. What-next: run a forecast model from that state.
-3. What-if: perturb validated inputs and recompute impacts.
+3. What-if: perturb validated inputs and recompute supported impacts.
 
 This implementation is deliberately data-honest. It uses the IMD RF25 dataset
-that is already part of the project and exposes uncertainty/coverage instead of
-inventing missing atmospheric variables.
+that is actually connected and exposes provenance, coverage and model limitations
+instead of inventing missing atmospheric variables. It is an India-scope climate
+Twin core, not a global Earth-system simulation.
 """
 
 from __future__ import annotations
@@ -258,17 +259,11 @@ def get_twin_health() -> dict[str, Any]:
             "engine_version": ENGINE_VERSION,
             "synchronization": snapshot["synchronization"],
             "what_now": "pass",
-            "what_next": "pass" if next_state["forecast"] else "fail",
-            "what_if": "pass",
-            "data_contract": "pass",
+            "what_next": next_state["status"],
         }
-    except Exception as error:
+    except Exception as exc:
         return {
             "status": "degraded",
             "engine_version": ENGINE_VERSION,
-            "error": str(error),
-            "what_now": "fail",
-            "what_next": "fail",
-            "what_if": "fail",
-            "data_contract": "fail",
+            "error": str(exc),
         }
