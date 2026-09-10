@@ -19,10 +19,12 @@ from backend.services.synchronization_service import synchronize
 from backend.services.data_catalog_service import get_data_catalog
 from backend.services.data_quality_service import validate_observation
 from backend.api.prithvi_routes import router as prithvi_contract_router
+from backend.api.governance_routes import router as governance_router
 
-app = FastAPI(title="India Climate Digital Twin API", description="Operational scientific API for the India Climate Digital Twin.", version="0.9.3")
+app = FastAPI(title="India Climate Digital Twin API", description="Operational scientific API for the India Climate Digital Twin.", version="0.9.4")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 app.include_router(prithvi_contract_router)
+app.include_router(governance_router)
 
 
 def _call(function, *args, **kwargs):
@@ -40,7 +42,7 @@ def _call(function, *args, **kwargs):
 
 @app.get("/")
 def root():
-    return {"project": "India Climate Digital Twin", "status": "online", "engine": "Python + FastAPI + India Climate Twin Core", "version": "0.9.3"}
+    return {"project": "India Climate Digital Twin", "status": "online", "engine": "Python + FastAPI + India Climate Twin Core", "version": "0.9.4"}
 
 @app.get("/api/status")
 def status(): return get_system_health()
