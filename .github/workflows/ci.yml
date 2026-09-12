@@ -28,6 +28,7 @@ jobs:
       - run: python -m pip install --upgrade pip
       - run: python -m pip install -r backend/requirements.txt
       - run: python -m compileall backend scripts
+      - run: python -m json.tool config/source_registry.json > /dev/null
       - run: |
           python - <<'PY'
           import importlib
