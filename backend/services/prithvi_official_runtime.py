@@ -1,12 +1,7 @@
 """Official Prithvi-WxC rollout runtime adapter.
 
-This module deliberately delegates preprocessing/model execution to the upstream
-NASA-IMPACT Prithvi-WxC package instead of reimplementing its scientific
-pipeline. The rollout model requires two MERRA-2 timestamps, official
-climatology/scalers, static features and a six-hour forecasting step.
-
-No forecast is returned unless the official runtime, required MERRA-2 files,
-climatology and model weights are actually available.
+This module delegates preprocessing, normalization and model execution to the
+upstream NASA-IMPACT Prithvi-WxC package. The model is never approximated here.
 """
 from __future__ import annotations
 
@@ -80,18 +75,16 @@ def run_official_rollout(
     time_end: str,
     lead_time_hours: int = 6,
 ) -> dict[str, Any]:
-    """Execute one or more official Prithvi-WxC rollout steps.
+    """Run the official rollout and return its physical forecast tensor.
 
-    The upstream rollout dataloader is used for file discovery, climatology,
-    static features, normalization and target construction. The upstream
-    ``rollout_iter`` helper then performs autoregressive inference.
+    ``PrithviWxC.configs.load_model`` loads the official checkpoint together
+    with its input/output scaling factors. The model therefore owns the
+    normalization/residual-climatology transformation; this adapter does not
+    manually rescale its output.
     """
     status = get_official_runtime_status()
     if not status["official_package_installed"]:
-        raise RuntimeError(
-            "Official PrithviWxC package is not installed. Install the NASA-IMPACT "
-            "Prithvi-WxC package before enabling model inference."
-        )
+        raise RuntimeError("Official PrithviWxC package is not installed.")
     missing = [name for name, present in status["scalers_present"].items() if not present]
     if missing:
         raise RuntimeError("Required Prithvi-WxC climatology files are missing: " + ", ".join(missing))
@@ -128,11 +121,15 @@ def run_official_rollout(
         raise RuntimeError("Prithvi-WxC found no valid MERRA-2 rollout sample for the requested time range.")
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = load_model("large_rollout", data_dir, load_weights=True)
-    model = model.to(device)
+    model = load_model("large_rollout", data_dir, load_weights=True).to(device)
     model.eval()
 
-    data = next(iter(dataset))
+    sample = next(iter(dataset))
+    if isinstance(sample, tuple):
+        data, target_times = sample
+    else:
+        data, target_times = sample, None
+
     padding = {"level": [0, 0], "lat": [0, -1], "lon": [0, 0]}
     batch = preproc([data], padding)
     for key, value in batch.items():
@@ -140,12 +137,20 @@ def run_official_rollout(
             batch[key] = value.to(device)
 
     with torch.no_grad():
-        output = rollout_iter(dataset.nsteps, model, batch)
+        result = rollout_iter(dataset.nsteps, model, batch)
+
+    if isinstance(result, tuple):
+        output = result[0]
+        all_outputs = result[2] if len(result) > 2 else None
+    else:
+        output = result
+        all_outputs = None
 
     output_cpu = output.detach().cpu()
     if not torch.isfinite(output_cpu).all():
         raise RuntimeError("Prithvi-WxC returned non-finite forecast values.")
 
+    target_time = target_times[-1] if target_times else batch.get("target_time")
     return {
         "status": "forecast_generated",
         "model": "prithvi.wxc.rollout.2300m.v1",
@@ -155,7 +160,8 @@ def run_official_rollout(
         "rollout_steps": int(dataset.nsteps),
         "output_shape": list(output_cpu.shape),
         "output_dtype": str(output_cpu.dtype),
-        "target_time": str(data.get("target_time", "")),
+        "target_time": str(target_time),
         "source": "NASA-IMPACT Prithvi-WxC official rollout pipeline",
         "forecast_tensor": output_cpu,
+        "all_outputs": all_outputs,
     }
