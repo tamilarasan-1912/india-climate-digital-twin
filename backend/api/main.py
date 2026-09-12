@@ -24,8 +24,9 @@ from backend.services.prithvi_wxc_service import get_prithvi_wxc_status, validat
 from backend.services.climate_state_contract import get_climate_state_contract
 from backend.services.multi_variable_twin_service import get_active_variable_catalog
 from backend.services.merra2_tensor_service import inspect_input_file
+from backend.services.prithvi_preprocessing_service import inspect_preprocessing
 
-app = FastAPI(title="India Climate Digital Twin API", description="Operational scientific API for the India Climate Digital Twin.", version="0.9.0")
+app = FastAPI(title="India Climate Digital Twin API", description="Operational scientific API for the India Climate Digital Twin.", version="1.0.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
 
@@ -44,7 +45,7 @@ def _call(function, *args, **kwargs):
 
 @app.get("/")
 def root():
-    return {"project": "India Climate Digital Twin", "status": "online", "engine": "Python + FastAPI + India Climate Twin Core", "version": "0.9.0"}
+    return {"project": "India Climate Digital Twin", "status": "online", "engine": "Python + FastAPI + India Climate Twin Core", "version": "1.0.0"}
 
 @app.get("/api/status")
 def status(): return get_system_health()
@@ -144,6 +145,16 @@ def prithvi_input(path: str | None = Query(default=None, min_length=1)):
             raise HTTPException(status_code=503, detail="No MERRA-2 NetCDF file is available in backend/data/merra2")
         path = str(files[-1])
     return _call(inspect_input_file, path)
+@app.get("/api/ai/prithvi/preprocess")
+def prithvi_preprocess(path: str | None = Query(default=None, min_length=1)):
+    """Prepare a real MERRA-2 input with official Prithvi climatology scaling."""
+    if not path:
+        from backend.services.merra2_input_validator import discover_files
+        files = discover_files()
+        if not files:
+            raise HTTPException(status_code=503, detail="No MERRA-2 NetCDF file is available in backend/data/merra2")
+        path = str(files[-1])
+    return _call(inspect_preprocessing, path)
 
 # -------------------- EXPLAINABILITY --------------------
 @app.get("/api/explain/rainfall")
