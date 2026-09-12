@@ -21,8 +21,11 @@ from backend.services.twin_engine import build_twin_snapshot, build_what_next, b
 from backend.services.india_hierarchy_service import get_india_hierarchy, resolve_location
 from backend.services.state_twin_service import get_all_state_climate_metrics, get_state_climate_metrics, get_state_twin
 from backend.services.prithvi_wxc_service import get_prithvi_wxc_status, validate_prithvi_inputs, run_local_inference
+from backend.services.climate_state_contract import get_climate_state_contract
+from backend.services.multi_variable_twin_service import get_active_variable_catalog
+from backend.services.merra2_tensor_service import inspect_input_file
 
-app = FastAPI(title="India Climate Digital Twin API", description="Operational scientific API for the India Climate Digital Twin.", version="0.8.0")
+app = FastAPI(title="India Climate Digital Twin API", description="Operational scientific API for the India Climate Digital Twin.", version="0.9.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
 
@@ -41,7 +44,7 @@ def _call(function, *args, **kwargs):
 
 @app.get("/")
 def root():
-    return {"project": "India Climate Digital Twin", "status": "online", "engine": "Python + FastAPI + India Climate Twin Core", "version": "0.8.0"}
+    return {"project": "India Climate Digital Twin", "status": "online", "engine": "Python + FastAPI + India Climate Twin Core", "version": "0.9.0"}
 
 @app.get("/api/status")
 def status(): return get_system_health()
@@ -49,6 +52,12 @@ def status(): return get_system_health()
 def health(): return get_system_health()
 @app.get("/api/climate/variables")
 def climate_variables(): return {"variables": CLIMATE_VARIABLES}
+
+# -------------------- DIGITAL TWIN CONTRACT --------------------
+@app.get("/api/twin/contract")
+def twin_contract(): return get_climate_state_contract()
+@app.get("/api/twin/active-variables")
+def twin_active_variables(): return {"variables": get_active_variable_catalog()}
 
 # -------------------- INDIA HIERARCHY --------------------
 @app.get("/api/india/hierarchy")
@@ -125,6 +134,16 @@ def prithvi_status(): return _call(get_prithvi_wxc_status)
 def prithvi_validate(): return _call(validate_prithvi_inputs)
 @app.post("/api/ai/prithvi/load")
 def prithvi_load(): return _call(run_local_inference)
+@app.get("/api/ai/prithvi/input")
+def prithvi_input(path: str | None = Query(default=None, min_length=1)):
+    """Validate and assemble a real MERRA-2 file without exposing tensor bytes."""
+    if not path:
+        from backend.services.merra2_input_validator import discover_files
+        files = discover_files()
+        if not files:
+            raise HTTPException(status_code=503, detail="No MERRA-2 NetCDF file is available in backend/data/merra2")
+        path = str(files[-1])
+    return _call(inspect_input_file, path)
 
 # -------------------- EXPLAINABILITY --------------------
 @app.get("/api/explain/rainfall")
