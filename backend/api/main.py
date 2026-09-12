@@ -25,8 +25,9 @@ from backend.services.climate_state_contract import get_climate_state_contract
 from backend.services.multi_variable_twin_service import get_active_variable_catalog
 from backend.services.merra2_tensor_service import inspect_input_file
 from backend.services.prithvi_preprocessing_service import inspect_preprocessing
+from backend.api.forecast_state_routes import generate_prithvi_forecast
 
-app = FastAPI(title="India Climate Digital Twin API", description="Operational scientific API for the India Climate Digital Twin.", version="1.0.0")
+app = FastAPI(title="India Climate Digital Twin API", description="Operational scientific API for the India Climate Digital Twin.", version="1.1.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
 
@@ -45,7 +46,7 @@ def _call(function, *args, **kwargs):
 
 @app.get("/")
 def root():
-    return {"project": "India Climate Digital Twin", "status": "online", "engine": "Python + FastAPI + India Climate Twin Core", "version": "1.0.0"}
+    return {"project": "India Climate Digital Twin", "status": "online", "engine": "Python + FastAPI + India Climate Twin Core", "version": "1.1.0"}
 
 @app.get("/api/status")
 def status(): return get_system_health()
@@ -155,6 +156,14 @@ def prithvi_preprocess(path: str | None = Query(default=None, min_length=1)):
             raise HTTPException(status_code=503, detail="No MERRA-2 NetCDF file is available in backend/data/merra2")
         path = str(files[-1])
     return _call(inspect_preprocessing, path)
+@app.post("/api/ai/prithvi/forecast")
+def prithvi_forecast(
+    time_start: str = Query(..., min_length=10),
+    time_end: str = Query(..., min_length=10),
+    lead_time_hours: int = Query(default=6, ge=6, le=72),
+):
+    """Run the official Prithvi-WxC rollout and build a Digital Twin forecast state."""
+    return _call(generate_prithvi_forecast, time_start, time_end, lead_time_hours)
 
 # -------------------- EXPLAINABILITY --------------------
 @app.get("/api/explain/rainfall")
