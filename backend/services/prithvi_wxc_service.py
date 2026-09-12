@@ -7,6 +7,8 @@ import os
 from pathlib import Path
 from typing import Any
 
+import xarray as xr
+
 from backend.services.merra2_input_validator import discover_files, validate_dataset
 from backend.services.prithvi_input_adapter import (
     EXPECTED_VARIABLE_COUNT,
@@ -114,6 +116,28 @@ def validate_prithvi_inputs() -> dict[str, Any]:
     }
 
 
+def _infer_time_range_from_local_merra() -> tuple[str, str]:
+    """Infer two real six-hour input timestamps from the newest local NetCDF."""
+    candidates = sorted(discover_files(), key=lambda p: p.stat().st_mtime, reverse=True)
+    if not candidates:
+        raise RuntimeError("Cannot infer Prithvi-WxC timestamps: no local MERRA-2 NetCDF files were found.")
+    for path in candidates:
+        try:
+            with xr.open_dataset(path) as ds:
+                for name in ("time", "TIME"):
+                    if name in ds.coords or name in ds.dims:
+                        values = ds[name].values
+                        if len(values) < 2:
+                            continue
+                        end = values[-1]
+                        start = end - __import__("numpy").timedelta64(6, "h")
+                        if start in values:
+                            return str(start), str(end)
+        except Exception:
+            continue
+    raise RuntimeError("Cannot infer two six-hour-separated timestamps from local MERRA-2 data.")
+
+
 def run_local_inference(
     time_start: str | None = None,
     time_end: str | None = None,
@@ -121,21 +145,19 @@ def run_local_inference(
 ) -> dict[str, Any]:
     """Run the official NASA-IMPACT Prithvi-WxC rollout pipeline.
 
-    Dates may be supplied explicitly or through PRITHVI_WXC_TIME_START and
-    PRITHVI_WXC_TIME_END. A forecast is exposed only after the upstream
-    dataloader, climatology, normalization, model weights and forward pass all
-    succeed.
+    If timestamps are omitted by the API caller, the service derives them from
+    the newest real local MERRA-2 file; it never fabricates a forecast state.
     """
     start = time_start or os.getenv("PRITHVI_WXC_TIME_START")
     end = time_end or os.getenv("PRITHVI_WXC_TIME_END")
     if not start or not end:
-        raise ValueError(
-            "time_start and time_end are required for official Prithvi-WxC inference. "
-            "Use ISO-8601 timestamps covering the two input states."
-        )
+        start, end = _infer_time_range_from_local_merra()
+
     result = run_official_rollout(start, end, lead_time_hours)
     tensor = result.pop("forecast_tensor")
     result["forecast_tensor_shape"] = list(tensor.shape)
     result["forecast_tensor_device"] = str(tensor.device)
     result["forecast_values_materialized"] = True
+    result["input_time_start"] = start
+    result["input_time_end"] = end
     return result
