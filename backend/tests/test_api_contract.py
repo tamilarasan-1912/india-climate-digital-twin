@@ -19,15 +19,11 @@ class ApiContractTests(unittest.TestCase):
             import backend.api.main as main
             origins = getattr(main, "_allowed_origins", [])
             self.assertNotIn("*", origins)
+            self.assertIn("CORSMiddleware", [middleware.cls.__name__ for middleware in main.app.user_middleware])
+            self.assertTrue(callable(getattr(main, "request_context", None)))
         finally:
             if previous is not None:
                 os.environ["CORS_ALLOW_ALL"] = previous
-
-    def test_request_security_middleware_is_present(self):
-        import backend.api.main as main
-        middleware_names = [middleware.cls.__name__ for middleware in main.app.user_middleware]
-        self.assertIn("CORSMiddleware", middleware_names)
-        self.assertTrue(any(callable(obj) and getattr(obj, "__name__", "") == "request_context" for obj in main.app.middleware_stack.__class__.__mro__))
 
 
 if __name__ == "__main__":
