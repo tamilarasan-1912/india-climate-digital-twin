@@ -1,12 +1,4 @@
-"""Prithvi WxC readiness and optional local inference integration.
-
-The repository never stores the 28.4 GB Prithvi WxC checkpoint. The service
-therefore separates scientific readiness checks from optional inference.
-
-The official rollout checkpoint is intended for forecasting and expects two
-MERRA-2 timestamps, 160 atmospheric variables, a 6-hour input interval and a
-6-hour forecast lead.
-"""
+"""Prithvi WxC readiness and official rollout integration."""
 
 from __future__ import annotations
 
@@ -22,6 +14,7 @@ from backend.services.prithvi_input_adapter import (
     INPUT_INTERVAL_HOURS,
     MODEL_NAME,
 )
+from backend.services.prithvi_official_runtime import get_official_runtime_status, run_official_rollout
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 MODEL_DIR = PROJECT_ROOT / "models" / "prithvi-wxc"
@@ -44,12 +37,15 @@ def get_prithvi_wxc_status() -> dict[str, Any]:
         except Exception as error:
             datasets.append({"file": str(path), "valid": False, "error": str(error)})
 
-    terratorch_installed = importlib.util.find_spec("terratorch") is not None
     torch_installed = importlib.util.find_spec("torch") is not None
+    official = get_official_runtime_status()
     basic_input_ready = any(
         item.get("basic_structure_valid") and item.get("variable_count", 0) >= EXPECTED_VARIABLE_COUNT
         for item in datasets
     )
+
+    blockers = _get_blockers(checkpoint, torch_installed, basic_input_ready, official)
+    inference_ready = bool(torch_installed and official["ready"])
 
     return {
         "model": MODEL_NAME,
@@ -66,30 +62,39 @@ def get_prithvi_wxc_status() -> dict[str, Any]:
             "path": str(checkpoint),
             "present": checkpoint.exists(),
             "expected_size_gb": MODEL_SIZE_GB,
+            "note": "Official runtime may download/manage its own Hugging Face checkpoint cache.",
         },
         "runtime": {
             "python_torch": torch_installed,
-            "terratorch": terratorch_installed,
+            "official_prithvi_package": official["official_package_installed"],
+            "official_runtime": official,
         },
         "merra2": {
             "files_found": len(merra_files),
             "input_ready": basic_input_ready,
             "datasets": datasets,
         },
-        "inference_ready": bool(checkpoint.exists() and terratorch_installed and torch_installed and basic_input_ready),
-        "status": "ready" if checkpoint.exists() and terratorch_installed and torch_installed and basic_input_ready else "blocked",
-        "blockers": _get_blockers(checkpoint, terratorch_installed, torch_installed, basic_input_ready),
+        "inference_ready": inference_ready,
+        "status": "ready" if inference_ready else "blocked",
+        "blockers": blockers,
     }
 
 
-def _get_blockers(checkpoint: Path, terratorch: bool, torch: bool, input_ready: bool) -> list[str]:
+def _get_blockers(
+    checkpoint: Path,
+    torch: bool,
+    input_ready: bool,
+    official: dict[str, Any],
+) -> list[str]:
     blockers: list[str] = []
-    if not checkpoint.exists():
-        blockers.append("Prithvi WxC rollout checkpoint is not installed locally.")
     if not torch:
         blockers.append("PyTorch is not installed in the active environment.")
-    if not terratorch:
-        blockers.append("TerraTorch is not installed in the active environment.")
+    if not official["official_package_installed"]:
+        blockers.append("Official NASA-IMPACT PrithviWxC package is not installed.")
+    if not official["ready"]:
+        missing = [name for name, present in official["scalers_present"].items() if not present]
+        if missing:
+            blockers.append("Required official climatology/scaler files are missing: " + ", ".join(missing))
     if not input_ready:
         blockers.append("A validated MERRA-2 dataset with the required 160-variable structure is not available.")
     return blockers
@@ -109,35 +114,28 @@ def validate_prithvi_inputs() -> dict[str, Any]:
     }
 
 
-def run_local_inference() -> dict[str, Any]:
-    """Run the model only when all prerequisites are actually present.
+def run_local_inference(
+    time_start: str | None = None,
+    time_end: str | None = None,
+    lead_time_hours: int = 6,
+) -> dict[str, Any]:
+    """Run the official NASA-IMPACT Prithvi-WxC rollout pipeline.
 
-    This method intentionally refuses to fabricate a forecast. The exact
-    MERRA-2 preprocessing and tensor construction must be performed by the
-    TerraTorch/MERRA-2 pipeline before model.forward is invoked.
+    Dates may be supplied explicitly or through PRITHVI_WXC_TIME_START and
+    PRITHVI_WXC_TIME_END. A forecast is exposed only after the upstream
+    dataloader, climatology, normalization, model weights and forward pass all
+    succeed.
     """
-    status = get_prithvi_wxc_status()
-    if not status["inference_ready"]:
-        raise RuntimeError(
-            "Prithvi WxC inference is blocked: " + "; ".join(status["blockers"])
+    start = time_start or os.getenv("PRITHVI_WXC_TIME_START")
+    end = time_end or os.getenv("PRITHVI_WXC_TIME_END")
+    if not start or not end:
+        raise ValueError(
+            "time_start and time_end are required for official Prithvi-WxC inference. "
+            "Use ISO-8601 timestamps covering the two input states."
         )
-
-    try:
-        from terratorch.registry import BACKBONE_REGISTRY
-    except ImportError as error:
-        raise RuntimeError("TerraTorch is required for Prithvi WxC inference.") from error
-
-    checkpoint = str(_checkpoint_path())
-    model = BACKBONE_REGISTRY.build(
-        MODEL_REPOSITORY,
-        ckpt_path=checkpoint,
-    )
-
-    return {
-        "status": "model_loaded",
-        "model": MODEL_NAME,
-        "checkpoint": checkpoint,
-        "model_class": type(model).__name__,
-        "message": "Checkpoint loaded successfully. Feed a TerraTorch-preprocessed two-timestamp MERRA-2 tensor to the model before exposing forecast output.",
-        "next_step": "wire the validated MERRA-2 dataloader/tensor contract into model.forward",
-    }
+    result = run_official_rollout(start, end, lead_time_hours)
+    tensor = result.pop("forecast_tensor")
+    result["forecast_tensor_shape"] = list(tensor.shape)
+    result["forecast_tensor_device"] = str(tensor.device)
+    result["forecast_values_materialized"] = True
+    return result
