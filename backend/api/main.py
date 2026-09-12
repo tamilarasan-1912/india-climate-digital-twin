@@ -1,7 +1,11 @@
 from __future__ import annotations
 
-from fastapi import FastAPI, HTTPException, Query
+import os
+import uuid
+
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from backend.config.climate_config import CLIMATE_VARIABLES
 from backend.services.rainfall_service import (
@@ -22,8 +26,41 @@ from backend.services.india_hierarchy_service import get_india_hierarchy, resolv
 from backend.services.state_twin_service import get_all_state_climate_metrics, get_state_climate_metrics, get_state_twin
 from backend.services.prithvi_wxc_service import get_prithvi_wxc_status, validate_prithvi_inputs, run_local_inference
 
-app = FastAPI(title="India Climate Digital Twin API", description="Operational scientific API for the India Climate Digital Twin.", version="0.8.0")
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
+app = FastAPI(
+    title="India Climate Digital Twin API",
+    description="Operational scientific API for the India Climate Digital Twin.",
+    version="0.9.0",
+)
+
+_allowed_origins = [origin.strip() for origin in os.getenv("CORS_ALLOWED_ORIGINS", "http://localhost:3000").split(",") if origin.strip()]
+if os.getenv("CORS_ALLOW_ALL", "false").lower() == "true":
+    _allowed_origins = ["*"]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_allowed_origins,
+    allow_credentials="*" not in _allowed_origins,
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-Request-ID"],
+)
+
+
+@app.middleware("http")
+async def request_context(request: Request, call_next):
+    request_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
+    try:
+        response = await call_next(request)
+    except Exception as error:
+        response = JSONResponse(
+            status_code=500,
+            content={"error": {"code": "INTERNAL_ERROR", "message": "Internal server error", "request_id": request_id}},
+        )
+    response.headers["X-Request-ID"] = request_id
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
+    return response
 
 
 def _call(function, *args, **kwargs):
@@ -36,12 +73,12 @@ def _call(function, *args, **kwargs):
     except RuntimeError as error:
         raise HTTPException(status_code=503, detail=str(error)) from error
     except Exception as error:
-        raise HTTPException(status_code=500, detail=str(error)) from error
+        raise HTTPException(status_code=500, detail="Internal service error") from error
 
 
 @app.get("/")
 def root():
-    return {"project": "India Climate Digital Twin", "status": "online", "engine": "Python + FastAPI + India Climate Twin Core", "version": "0.8.0"}
+    return {"project": "India Climate Digital Twin", "status": "online", "engine": "Python + FastAPI + India Climate Twin Core", "version": "0.9.0"}
 
 @app.get("/api/status")
 def status(): return get_system_health()

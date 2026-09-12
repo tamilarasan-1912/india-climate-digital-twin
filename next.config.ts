@@ -21,6 +21,12 @@ const nextConfig: NextConfig = {
       { source: "/api/provenance", destination: `${API}/api/provenance` },
       { source: "/api/health", destination: `${API}/api/health` },
       { source: "/api/status", destination: `${API}/api/status` },
+      { source: "/api/india/:path*", destination: `${API}/api/india/:path*` },
+      { source: "/api/operations/:path*", destination: `${API}/api/operations/:path*` },
+      { source: "/api/governance/:path*", destination: `${API}/api/governance/:path*` },
+      { source: "/api/data/:path*", destination: `${API}/api/data/:path*` },
+      { source: "/api/reports/:path*", destination: `${API}/api/reports/:path*` },
+      { source: "/api/satellite/:path*", destination: `${API}/api/satellite/:path*` },
     ];
   },
 };
