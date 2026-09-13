@@ -8,30 +8,25 @@ mapped from the model output are exposed.
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any, Mapping, Sequence
+from typing import Any, Mapping
 
 import numpy as np
 
 from backend.services.multi_variable_twin_service import build_state_envelope
 
-# The first 20 channels are the surface variables in the official Prithvi-WxC
-# ordering. Vertical channels follow as variable x 14 levels.
 SURFACE_CHANNELS = (
     "EFLUX", "GWETROOT", "HFLUX", "LAI", "LWGAB", "LWGEM", "LWTUP",
     "PS", "QV2M", "SLP", "SWGNT", "SWTNT", "T2M", "TQI", "TQL",
     "TQV", "TS", "U10M", "V10M", "Z0M",
 )
 
-# Contract variables currently supported by the twin. PRECTOT is intentionally
-# not mapped here because the rollout checkpoint's surface channel contract
-# does not contain it.
 MODEL_TO_TWIN = {
     "T2M": ("air_temperature_2m", "K"),
-    "QV2M": ("specific_humidity_2m", "kg/kg"),
+    "QV2M": ("specific_humidity_2m", "kg kg-1"),
     "PS": ("surface_pressure", "Pa"),
     "SLP": ("sea_level_pressure", "Pa"),
-    "U10M": ("wind_u_10m", "m/s"),
-    "V10M": ("wind_v_10m", "m/s"),
+    "U10M": ("wind_u_10m", "m s-1"),
+    "V10M": ("wind_v_10m", "m s-1"),
     "LAI": ("leaf_area_index", "1"),
     "TS": ("land_surface_temperature", "K"),
 }
@@ -47,7 +42,6 @@ def _as_array(output: Any) -> np.ndarray:
 
 
 def _surface_field(output: np.ndarray, channel: int) -> np.ndarray:
-    """Extract a surface field from [B,T,C,H,W] or [B,C,H,W] output."""
     if output.ndim == 5:
         return output[0, -1, channel]
     if output.ndim == 4:
@@ -67,7 +61,6 @@ def build_forecast_state(
     model_version: str = "1.0.0",
     lead_time_hours: int = 6,
 ) -> dict[str, Any]:
-    """Build a Digital Twin forecast envelope from a genuine model output."""
     tensor = _as_array(output)
     variables: dict[str, Mapping[str, Any]] = {}
 
@@ -109,16 +102,14 @@ def build_forecast_state(
 
 
 def build_hazard_summary(forecast_state: Mapping[str, Any]) -> dict[str, Any]:
-    """Derive transparent hazard indicators only from available forecast fields."""
     values = forecast_state.get("variables", {})
     hazards: dict[str, Any] = {}
 
     temp = values.get("air_temperature_2m")
     if temp:
-        mean_k = float(temp["value"]["mean"])
         hazards["heat"] = {
             "indicator": "2m air temperature",
-            "mean_temperature_c": mean_k - 273.15,
+            "mean_temperature_c": float(temp["value"]["mean"]) - 273.15,
             "status": "screening_only",
         }
 
