@@ -3,6 +3,7 @@ import unittest
 from backend.models.domain_models import Exposure
 from backend.services.alert_service import build_alert
 from backend.services.exposure_engine import assess_exposure, aggregate_exposures
+from backend.services.heat_risk_engine import assess_heat_risk
 from backend.services.risk_engine import assess_asset, expected_annual_loss
 from backend.services.scenario_engine import build_scenario
 
@@ -52,6 +53,17 @@ class IndustryPlatformTests(unittest.TestCase):
         self.assertEqual(result["assessed_asset_count"], 1)
         self.assertEqual(result["population_exposure"], 10)
         self.assertEqual(result["economic_exposure_inr"], 100)
+
+    def test_heat_risk_requires_exposure(self):
+        result = assess_heat_risk(temperature_c=40, relative_humidity_pct=60, exposure_index=None)
+        self.assertIsNone(result["risk_score"])
+        self.assertEqual(result["status"], "not_available")
+
+    def test_heat_risk_combines_thermal_and_exposure_components(self):
+        result = assess_heat_risk(temperature_c=40, relative_humidity_pct=60, exposure_index=0.8)
+        self.assertEqual(result["status"], "screening_only")
+        self.assertGreater(result["derived"]["heat_index_c"], 40)
+        self.assertGreater(result["risk_score"], 0)
 
     def test_scenario_marks_coastal_as_uncoupled(self):
         result = build_scenario(
