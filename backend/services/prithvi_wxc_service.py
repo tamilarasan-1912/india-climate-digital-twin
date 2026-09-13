@@ -10,12 +10,7 @@ from typing import Any
 import xarray as xr
 
 from backend.services.merra2_input_validator import discover_files, validate_dataset
-from backend.services.prithvi_input_adapter import (
-    EXPECTED_VARIABLE_COUNT,
-    FORECAST_LEAD_HOURS,
-    INPUT_INTERVAL_HOURS,
-    MODEL_NAME,
-)
+from backend.services.prithvi_input_adapter import EXPECTED_VARIABLE_COUNT, FORECAST_LEAD_HOURS, INPUT_INTERVAL_HOURS, MODEL_NAME
 from backend.services.prithvi_official_runtime import get_official_runtime_status, run_official_rollout
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -41,13 +36,12 @@ def get_prithvi_wxc_status() -> dict[str, Any]:
 
     torch_installed = importlib.util.find_spec("torch") is not None
     official = get_official_runtime_status()
-    basic_input_ready = any(
+    input_ready = any(
         item.get("basic_structure_valid") and item.get("variable_count", 0) >= EXPECTED_VARIABLE_COUNT
         for item in datasets
     )
-
-    blockers = _get_blockers(checkpoint, torch_installed, basic_input_ready, official)
-    inference_ready = bool(torch_installed and official["ready"])
+    blockers = _get_blockers(torch_installed, input_ready, official)
+    inference_ready = bool(torch_installed and input_ready and official["ready"])
 
     return {
         "model": MODEL_NAME,
@@ -73,7 +67,7 @@ def get_prithvi_wxc_status() -> dict[str, Any]:
         },
         "merra2": {
             "files_found": len(merra_files),
-            "input_ready": basic_input_ready,
+            "input_ready": input_ready,
             "datasets": datasets,
         },
         "inference_ready": inference_ready,
@@ -82,12 +76,7 @@ def get_prithvi_wxc_status() -> dict[str, Any]:
     }
 
 
-def _get_blockers(
-    checkpoint: Path,
-    torch: bool,
-    input_ready: bool,
-    official: dict[str, Any],
-) -> list[str]:
+def _get_blockers(torch: bool, input_ready: bool, official: dict[str, Any]) -> list[str]:
     blockers: list[str] = []
     if not torch:
         blockers.append("PyTorch is not installed in the active environment.")
@@ -117,7 +106,6 @@ def validate_prithvi_inputs() -> dict[str, Any]:
 
 
 def _infer_time_range_from_local_merra() -> tuple[str, str]:
-    """Infer two real six-hour input timestamps from the newest local NetCDF."""
     candidates = sorted(discover_files(), key=lambda p: p.stat().st_mtime, reverse=True)
     if not candidates:
         raise RuntimeError("Cannot infer Prithvi-WxC timestamps: no local MERRA-2 NetCDF files were found.")
@@ -138,21 +126,11 @@ def _infer_time_range_from_local_merra() -> tuple[str, str]:
     raise RuntimeError("Cannot infer two six-hour-separated timestamps from local MERRA-2 data.")
 
 
-def run_local_inference(
-    time_start: str | None = None,
-    time_end: str | None = None,
-    lead_time_hours: int = 6,
-) -> dict[str, Any]:
-    """Run the official NASA-IMPACT Prithvi-WxC rollout pipeline.
-
-    If timestamps are omitted by the API caller, the service derives them from
-    the newest real local MERRA-2 file; it never fabricates a forecast state.
-    """
+def run_local_inference(time_start: str | None = None, time_end: str | None = None, lead_time_hours: int = 6) -> dict[str, Any]:
     start = time_start or os.getenv("PRITHVI_WXC_TIME_START")
     end = time_end or os.getenv("PRITHVI_WXC_TIME_END")
     if not start or not end:
         start, end = _infer_time_range_from_local_merra()
-
     result = run_official_rollout(start, end, lead_time_hours)
     tensor = result.pop("forecast_tensor")
     result["forecast_tensor_shape"] = list(tensor.shape)
