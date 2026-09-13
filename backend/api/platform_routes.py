@@ -1,4 +1,4 @@
-"""Industry platform APIs: assets, risk, scenarios, datasets and alerts."""
+"""Industry platform APIs: assets, exposure, risk, scenarios, datasets and alerts."""
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -6,10 +6,11 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException
 
-from backend.models.domain_models import Asset
+from backend.models.domain_models import Asset, Exposure
 from backend.services.alert_service import build_alert, get_language_catalog
 from backend.services.asset_repository import get_asset, upsert_asset
 from backend.services.dataset_catalog import get_catalog_contract
+from backend.services.exposure_engine import assess_exposure
 from backend.services.flood_twin_service import get_flood_twin_status
 from backend.services.risk_contract import get_risk_contract
 from backend.services.risk_engine import assess_asset
@@ -25,6 +26,7 @@ def capabilities() -> dict[str, Any]:
         "api_version": "v1",
         "capabilities": {
             "assets": "postgis-backed",
+            "exposure": "source-driven population/infrastructure/economic screening",
             "risk_contract": get_risk_contract(),
             "scenario_engine": "coupling-aware sensitivity engine",
             "dataset_catalog": "STAC-compatible",
@@ -66,6 +68,39 @@ def read_asset(asset_id: str) -> dict[str, Any]:
     if result is None:
         raise HTTPException(status_code=404, detail="Asset not found")
     return result
+
+
+@router.post("/assets/{asset_id}/exposure")
+def asset_exposure(
+    asset_id: str,
+    population: float | None = None,
+    replacement_value_inr: float | None = None,
+    annual_revenue_inr: float | None = None,
+    service_criticality: float | None = None,
+    supply_chain_dependency: float | None = None,
+    data_quality_score: float | None = None,
+    population_scale: float | None = None,
+    economic_scale_inr: float | None = None,
+    source_ids: list[str] | None = None,
+) -> dict[str, Any]:
+    asset = get_asset(asset_id)
+    if asset is None:
+        raise HTTPException(status_code=404, detail="Asset not found")
+    exposure = Exposure(
+        asset_id=asset_id,
+        population=population,
+        replacement_value_inr=replacement_value_inr,
+        annual_revenue_inr=annual_revenue_inr,
+        service_criticality=service_criticality,
+        supply_chain_dependency=supply_chain_dependency,
+        data_quality_score=data_quality_score,
+        source_ids=source_ids or [],
+    )
+    return assess_exposure(
+        exposure,
+        population_scale=population_scale,
+        economic_scale_inr=economic_scale_inr,
+    )
 
 
 @router.post("/assets/{asset_id}/risk")
