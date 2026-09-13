@@ -10,6 +10,7 @@ from backend.models.domain_models import Asset
 from backend.services.alert_service import build_alert, get_language_catalog
 from backend.services.asset_repository import get_asset, upsert_asset
 from backend.services.dataset_catalog import get_catalog_contract
+from backend.services.flood_twin_service import get_flood_twin_status
 from backend.services.risk_contract import get_risk_contract
 from backend.services.risk_engine import assess_asset
 from backend.services.scenario_engine import build_scenario
@@ -28,6 +29,7 @@ def capabilities() -> dict[str, Any]:
             "scenario_engine": "coupling-aware sensitivity engine",
             "dataset_catalog": "STAC-compatible",
             "alerts": "channel-neutral multilingual payloads",
+            "flood_twin": get_flood_twin_status(),
             "large_data": "external object storage + STAC",
         },
     }
@@ -38,26 +40,19 @@ def catalog_contract() -> dict[str, Any]:
     return get_catalog_contract()
 
 
+@router.get("/flood/status")
+def flood_status() -> dict[str, Any]:
+    return get_flood_twin_status()
+
+
 @router.get("/alerts/languages")
 def alert_languages() -> list[dict[str, str]]:
     return get_language_catalog()
 
 
 @router.post("/alerts/preview")
-def alert_preview(
-    hazard: str,
-    severity: str,
-    region: str,
-    condition: str,
-    action: str,
-    expires: str,
-    language: str = "en",
-) -> dict[str, Any]:
-    return build_alert(
-        hazard=hazard, severity=severity, region=region,
-        condition=condition, action=action, expires=expires,
-        language=language,
-    )
+def alert_preview(hazard: str, severity: str, region: str, condition: str, action: str, expires: str, language: str = "en") -> dict[str, Any]:
+    return build_alert(hazard=hazard, severity=severity, region=region, condition=condition, action=action, expires=expires, language=language)
 
 
 @router.post("/assets")
@@ -74,17 +69,7 @@ def read_asset(asset_id: str) -> dict[str, Any]:
 
 
 @router.post("/assets/{asset_id}/risk")
-def asset_risk(
-    asset_id: str,
-    hazard: str,
-    hazard_value: float | None = None,
-    exposure_value: float | None = None,
-    vulnerability_value: float | None = None,
-    confidence: float | None = None,
-    probability: float | None = None,
-    consequence_inr: float | None = None,
-    validation_status: str = "unvalidated",
-) -> dict[str, Any]:
+def asset_risk(asset_id: str, hazard: str, hazard_value: float | None = None, exposure_value: float | None = None, vulnerability_value: float | None = None, confidence: float | None = None, probability: float | None = None, consequence_inr: float | None = None, validation_status: str = "unvalidated") -> dict[str, Any]:
     asset = get_asset(asset_id)
     if asset is None:
         raise HTTPException(status_code=404, detail="Asset not found")
@@ -106,19 +91,5 @@ def asset_risk(
 
 
 @router.post("/scenarios")
-def create_scenario(
-    scenario_id: str,
-    name: str,
-    horizon_year: int | None = None,
-    climate_scenario: str | None = None,
-    precipitation_delta_pct: float = 0,
-    temperature_delta_c: float = 0,
-    sea_level_rise_m: float = 0,
-) -> dict[str, Any]:
-    return build_scenario(
-        scenario_id=scenario_id, name=name, horizon_year=horizon_year,
-        climate_scenario=climate_scenario,
-        precipitation_delta_pct=precipitation_delta_pct,
-        temperature_delta_c=temperature_delta_c,
-        sea_level_rise_m=sea_level_rise_m,
-    )
+def create_scenario(scenario_id: str, name: str, horizon_year: int | None = None, climate_scenario: str | None = None, precipitation_delta_pct: float = 0, temperature_delta_c: float = 0, sea_level_rise_m: float = 0) -> dict[str, Any]:
+    return build_scenario(scenario_id=scenario_id, name=name, horizon_year=horizon_year, climate_scenario=climate_scenario, precipitation_delta_pct=precipitation_delta_pct, temperature_delta_c=temperature_delta_c, sea_level_rise_m=sea_level_rise_m)
