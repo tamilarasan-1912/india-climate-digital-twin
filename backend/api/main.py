@@ -25,9 +25,10 @@ from backend.services.climate_state_contract import get_climate_state_contract
 from backend.services.multi_variable_twin_service import get_active_variable_catalog
 from backend.services.merra2_tensor_service import inspect_input_file
 from backend.services.prithvi_preprocessing_service import inspect_preprocessing
+from backend.services.risk_contract import get_risk_contract
 from backend.api.forecast_state_routes import generate_prithvi_forecast
 
-app = FastAPI(title="India Climate Digital Twin API", description="Operational scientific API for the India Climate Digital Twin.", version="1.1.0")
+app = FastAPI(title="India Climate Digital Twin API", description="Operational scientific API for the India Climate Digital Twin.", version="1.2.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
 
@@ -46,7 +47,7 @@ def _call(function, *args, **kwargs):
 
 @app.get("/")
 def root():
-    return {"project": "India Climate Digital Twin", "status": "online", "engine": "Python + FastAPI + India Climate Twin Core", "version": "1.1.0"}
+    return {"project": "India Climate Digital Twin", "status": "online", "engine": "Python + FastAPI + India Climate Twin Core", "version": "1.2.0"}
 
 @app.get("/api/status")
 def status(): return get_system_health()
@@ -60,6 +61,8 @@ def climate_variables(): return {"variables": CLIMATE_VARIABLES}
 def twin_contract(): return get_climate_state_contract()
 @app.get("/api/twin/active-variables")
 def twin_active_variables(): return {"variables": get_active_variable_catalog()}
+@app.get("/api/risk/contract")
+def risk_contract(): return get_risk_contract()
 
 # -------------------- INDIA HIERARCHY --------------------
 @app.get("/api/india/hierarchy")
