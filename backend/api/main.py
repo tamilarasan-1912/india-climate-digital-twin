@@ -27,9 +27,11 @@ from backend.services.merra2_tensor_service import inspect_input_file
 from backend.services.prithvi_preprocessing_service import inspect_preprocessing
 from backend.services.risk_contract import get_risk_contract
 from backend.api.forecast_state_routes import generate_prithvi_forecast
+from backend.api.platform_routes import router as platform_router
 
-app = FastAPI(title="India Climate Digital Twin API", description="Operational scientific API for the India Climate Digital Twin.", version="1.2.0")
+app = FastAPI(title="India Climate Digital Twin API", description="Operational scientific API for the India Climate Digital Twin.", version="1.3.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
+app.include_router(platform_router)
 
 
 def _call(function, *args, **kwargs):
@@ -47,7 +49,7 @@ def _call(function, *args, **kwargs):
 
 @app.get("/")
 def root():
-    return {"project": "India Climate Digital Twin", "status": "online", "engine": "Python + FastAPI + India Climate Twin Core", "version": "1.2.0"}
+    return {"project": "India Climate Digital Twin", "status": "online", "engine": "Python + FastAPI + India Climate Twin Core", "version": "1.3.0"}
 
 @app.get("/api/status")
 def status(): return get_system_health()
@@ -141,7 +143,6 @@ def prithvi_validate(): return _call(validate_prithvi_inputs)
 def prithvi_load(): return _call(run_local_inference)
 @app.get("/api/ai/prithvi/input")
 def prithvi_input(path: str | None = Query(default=None, min_length=1)):
-    """Validate and assemble a real MERRA-2 file without exposing tensor bytes."""
     if not path:
         from backend.services.merra2_input_validator import discover_files
         files = discover_files()
@@ -151,7 +152,6 @@ def prithvi_input(path: str | None = Query(default=None, min_length=1)):
     return _call(inspect_input_file, path)
 @app.get("/api/ai/prithvi/preprocess")
 def prithvi_preprocess(path: str | None = Query(default=None, min_length=1)):
-    """Prepare a real MERRA-2 input with official Prithvi climatology scaling."""
     if not path:
         from backend.services.merra2_input_validator import discover_files
         files = discover_files()
@@ -160,12 +160,7 @@ def prithvi_preprocess(path: str | None = Query(default=None, min_length=1)):
         path = str(files[-1])
     return _call(inspect_preprocessing, path)
 @app.post("/api/ai/prithvi/forecast")
-def prithvi_forecast(
-    time_start: str = Query(..., min_length=10),
-    time_end: str = Query(..., min_length=10),
-    lead_time_hours: int = Query(default=6, ge=6, le=72),
-):
-    """Run the official Prithvi-WxC rollout and build a Digital Twin forecast state."""
+def prithvi_forecast(time_start: str = Query(..., min_length=10), time_end: str = Query(..., min_length=10), lead_time_hours: int = Query(default=6, ge=6, le=72)):
     return _call(generate_prithvi_forecast, time_start, time_end, lead_time_hours)
 
 # -------------------- EXPLAINABILITY --------------------
