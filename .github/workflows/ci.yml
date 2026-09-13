@@ -42,6 +42,7 @@ jobs:
               'backend.services.scenario_engine',
               'backend.services.dataset_catalog',
               'backend.services.alert_service',
+              'backend.services.flood_twin_service',
           ]
           for mod in mods:
               importlib.import_module(mod)
