@@ -1,4 +1,4 @@
-"""Industry platform APIs: assets, exposure, risk, scenarios, datasets and alerts."""
+"""Industry platform APIs: assets, exposure, risk, heat, scenarios, datasets and alerts."""
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -12,6 +12,7 @@ from backend.services.asset_repository import get_asset, upsert_asset
 from backend.services.dataset_catalog import get_catalog_contract
 from backend.services.exposure_engine import assess_exposure
 from backend.services.flood_twin_service import get_flood_twin_status
+from backend.services.heat_risk_engine import assess_heat_risk
 from backend.services.risk_contract import get_risk_contract
 from backend.services.risk_engine import assess_asset
 from backend.services.scenario_engine import build_scenario
@@ -27,6 +28,7 @@ def capabilities() -> dict[str, Any]:
         "capabilities": {
             "assets": "postgis-backed",
             "exposure": "source-driven population/infrastructure/economic screening",
+            "heat": "temperature-humidity-exposure screening",
             "risk_contract": get_risk_contract(),
             "scenario_engine": "coupling-aware sensitivity engine",
             "dataset_catalog": "STAC-compatible",
@@ -96,10 +98,21 @@ def asset_exposure(
         data_quality_score=data_quality_score,
         source_ids=source_ids or [],
     )
-    return assess_exposure(
-        exposure,
-        population_scale=population_scale,
-        economic_scale_inr=economic_scale_inr,
+    return assess_exposure(exposure, population_scale=population_scale, economic_scale_inr=economic_scale_inr)
+
+
+@router.post("/hazards/heat")
+def heat_hazard(
+    temperature_c: float,
+    relative_humidity_pct: float,
+    exposure_index: float | None = None,
+    confidence: float | None = None,
+) -> dict[str, Any]:
+    return assess_heat_risk(
+        temperature_c=temperature_c,
+        relative_humidity_pct=relative_humidity_pct,
+        exposure_index=exposure_index,
+        confidence=confidence,
     )
 
 
