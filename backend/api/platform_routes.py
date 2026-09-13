@@ -1,4 +1,4 @@
-"""Industry platform APIs: assets, risk assessments and scenarios."""
+"""Industry platform APIs: assets, risk, scenarios, datasets and alerts."""
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -7,7 +7,9 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 
 from backend.models.domain_models import Asset
+from backend.services.alert_service import build_alert, get_language_catalog
 from backend.services.asset_repository import get_asset, upsert_asset
+from backend.services.dataset_catalog import get_catalog_contract
 from backend.services.risk_contract import get_risk_contract
 from backend.services.risk_engine import assess_asset
 from backend.services.scenario_engine import build_scenario
@@ -24,9 +26,38 @@ def capabilities() -> dict[str, Any]:
             "assets": "postgis-backed",
             "risk_contract": get_risk_contract(),
             "scenario_engine": "coupling-aware sensitivity engine",
+            "dataset_catalog": "STAC-compatible",
+            "alerts": "channel-neutral multilingual payloads",
             "large_data": "external object storage + STAC",
         },
     }
+
+
+@router.get("/catalog/contract")
+def catalog_contract() -> dict[str, Any]:
+    return get_catalog_contract()
+
+
+@router.get("/alerts/languages")
+def alert_languages() -> list[dict[str, str]]:
+    return get_language_catalog()
+
+
+@router.post("/alerts/preview")
+def alert_preview(
+    hazard: str,
+    severity: str,
+    region: str,
+    condition: str,
+    action: str,
+    expires: str,
+    language: str = "en",
+) -> dict[str, Any]:
+    return build_alert(
+        hazard=hazard, severity=severity, region=region,
+        condition=condition, action=action, expires=expires,
+        language=language,
+    )
 
 
 @router.post("/assets")
@@ -67,11 +98,8 @@ def asset_risk(
         confidence=confidence,
         assessment_time=datetime.now(timezone.utc).isoformat(),
         model_version="risk-engine-1.0.0",
-        data_quality_score=None,
         validation_status=validation_status,
-        limitations=[
-            "Generic multiplicative screening engine; hazard-specific physical models must replace it for operational claims."
-        ],
+        limitations=["Generic multiplicative screening engine; validated hazard-specific models are required for operational claims."],
         probability=probability,
         consequence_inr=consequence_inr,
     )
@@ -88,9 +116,7 @@ def create_scenario(
     sea_level_rise_m: float = 0,
 ) -> dict[str, Any]:
     return build_scenario(
-        scenario_id=scenario_id,
-        name=name,
-        horizon_year=horizon_year,
+        scenario_id=scenario_id, name=name, horizon_year=horizon_year,
         climate_scenario=climate_scenario,
         precipitation_delta_pct=precipitation_delta_pct,
         temperature_delta_c=temperature_delta_c,
