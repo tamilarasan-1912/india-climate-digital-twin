@@ -31,6 +31,7 @@ from backend.api.platform_routes import router as platform_router
 from backend.api.ogc_routes import router as ogc_router
 from backend.services.climate_layer_service import get_climate_layer_catalog, get_layer_status, unavailable_layer
 from backend.services.climate_provider import get_provider_registry, provider_config
+from backend.services.gods_eye_service import build_gods_eye_state, get_gods_eye_layer
 
 app = FastAPI(title="India Climate Digital Twin API", description="Operational scientific API for the India Climate Digital Twin.", version="1.4.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
@@ -53,7 +54,7 @@ def _call(function, *args, **kwargs):
 
 @app.get("/")
 def root():
-    return {"project": "India Climate Digital Twin", "status": "online", "engine": "Python + FastAPI + India Climate Twin Core", "version": "1.3.0"}
+    return {"project": "India Climate Digital Twin", "status": "online", "engine": "Python + FastAPI + India Climate Twin Core", "version": "1.4.0"}
 
 @app.get("/api/status")
 def status(): return get_system_health()
@@ -73,6 +74,18 @@ def climate_providers(): return get_provider_registry()
 
 @app.get("/api/climate/providers/{layer}")
 def climate_provider(layer: str): return _call(provider_config, layer)
+
+@app.get("/api/gods-eye/state")
+def gods_eye_state(date: str = Query(..., min_length=10)):
+    """Single payload for the live India climate God's-Eye console."""
+    return _call(build_gods_eye_state, date)
+
+
+@app.get("/api/gods-eye/layer/{layer}/{date}")
+def gods_eye_layer(layer: str, date: str):
+    """Spatial layer contract used by the map; no-data remains explicit."""
+    return _call(get_gods_eye_layer, layer, date)
+
 
 @app.get("/api/climate/temperature/{date}")
 def climate_temperature(date: str): return unavailable_layer("temperature", date)
