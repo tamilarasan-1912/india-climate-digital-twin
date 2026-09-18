@@ -28,3 +28,10 @@ data/india/chennai/sentinel2_historical/
 # Prithvi example/generated output
 models/prithvi-eo-tiny/examples/
 models/prithvi-eo-tiny/output/
+
+# Raw/derived climate archives should not enter normal Git history.
+data/india/**/netcdf/
+data/india/**/zarr/
+data/india/**/rasters/
+data/india/**/climate_raw/
+backend/data/**/raw/
