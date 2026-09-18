@@ -1,4 +1,5 @@
 from pathlib import Path
+from functools import lru_cache
 
 import numpy as np
 import xarray as xr
@@ -19,7 +20,16 @@ DATA_FILE = (
 # LOAD DATASET
 # ============================================================
 
+@lru_cache(maxsize=1)
+def _cached_dataset():
+    if not DATA_FILE.exists():
+        raise FileNotFoundError(f"Rainfall dataset not found: {DATA_FILE}")
+    return xr.open_dataset(DATA_FILE)
+
+
 def load_dataset():
+    return _cached_dataset()
+
     """
     Open the IMD rainfall NetCDF dataset.
 
