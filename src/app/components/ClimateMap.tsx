@@ -5,7 +5,7 @@ import { Map, NavigationControl, Popup } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 
 type Props = {
-  layers: { satellite: boolean; terrain: boolean; anomalies: boolean; risk: boolean; events: boolean };
+  layers: { rainfall: boolean; temperature: boolean; lst: boolean; sst: boolean; anomalies: boolean; risk: boolean; events: boolean };
   date?: string;
   onStateSelect?: (name: string) => void;
   onCoords?: (lat: number, lon: number) => void;
@@ -48,8 +48,8 @@ export default function ClimateMap({ layers, date = "2024-07-15", onStateSelect,
         const current = latestLayers.current;
         const states = await fetch(INDIA, { cache: "no-store" }).then(r => { if (!r.ok) throw new Error("India boundary data unavailable"); return r.json(); });
         m.addSource("india-states", { type: "geojson", data: states });
-        m.addLayer({ id: "states-fill", type: "fill", source: "india-states", layout: { visibility: current.terrain ? "visible" : "none" }, paint: { "fill-color": "#123042", "fill-opacity": 0.20 } });
-        m.addLayer({ id: "states-outline", type: "line", source: "india-states", layout: { visibility: current.terrain ? "visible" : "none" }, paint: { "line-color": "#b6c7cf", "line-width": 1.1, "line-opacity": 0.82 } });
+        m.addLayer({ id: "states-fill", type: "fill", source: "india-states", layout: { visibility: "visible" }, paint: { "fill-color": "#123042", "fill-opacity": 0.20 } });
+        m.addLayer({ id: "states-outline", type: "line", source: "india-states", layout: { visibility: "visible" }, paint: { "line-color": "#b6c7cf", "line-width": 1.1, "line-opacity": 0.82 } });
         m.on("click", "states-fill", e => {
           const p = e.features?.[0]?.properties as Record<string, unknown> | undefined;
           const name = String(p?.shapeName ?? p?.NAME_1 ?? p?.st_nm ?? p?.STATE ?? "India");
@@ -66,7 +66,7 @@ export default function ClimateMap({ layers, date = "2024-07-15", onStateSelect,
         ]);
         if (rainfall?.features) {
           m.addSource("rainfall", { type: "geojson", data: rainfall });
-          m.addLayer({ id: "rainfall", type: "circle", source: "rainfall", layout: { visibility: current.satellite || current.anomalies ? "visible" : "none" }, paint: { "circle-radius": 5, "circle-color": ["interpolate", ["linear"], ["get", "rainfall_mm"], 0, "#38bdf8", 50, "#ffc176", 100, "#ff5f5f"], "circle-opacity": 0.72, "circle-stroke-color": "#e8fbff", "circle-stroke-width": 0.5 } });
+          m.addLayer({ id: "rainfall", type: "circle", source: "rainfall", layout: { visibility: current.rainfall || current.anomalies ? "visible" : "none" }, paint: { "circle-radius": 5, "circle-color": ["interpolate", ["linear"], ["get", "rainfall_mm"], 0, "#38bdf8", 50, "#ffc176", 100, "#ff5f5f"], "circle-opacity": 0.72, "circle-stroke-color": "#e8fbff", "circle-stroke-width": 0.5 } });
         }
         if (events?.features) {
           m.addSource("events", { type: "geojson", data: events });
@@ -85,7 +85,7 @@ export default function ClimateMap({ layers, date = "2024-07-15", onStateSelect,
     const m = map.current;
     if (!m || !m.isStyleLoaded()) return;
     const set = (id: string, visible: boolean) => { if (m.getLayer(id)) m.setLayoutProperty(id, "visibility", visible ? "visible" : "none"); };
-    set("states-fill", layers.terrain); set("states-outline", layers.terrain); set("rainfall", layers.satellite || layers.anomalies); set("events", layers.events); set("risk", layers.risk);
+    set("states-fill", true); set("states-outline", true); set("rainfall", layers.rainfall || layers.anomalies); set("events", layers.events); set("risk", layers.risk);
   }, [layers]);
 
   useEffect(() => {
