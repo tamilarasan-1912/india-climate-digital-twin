@@ -8,6 +8,9 @@ const nextConfig: NextConfig = {
     return [
       { source: "/api/rainfall/:path*", destination: `${API}/api/rainfall/:path*` },
       { source: "/api/climate/:path*", destination: `${API}/api/climate/:path*` },
+      { source: "/api/india/:path*", destination: `${API}/api/india/:path*` },
+      { source: "/api/v1/:path*", destination: `${API}/api/v1/:path*` },
+      { source: "/ogc/:path*", destination: `${API}/ogc/:path*` },
       { source: "/api/extreme-events/:path*", destination: `${API}/api/extreme-events/:path*` },
       { source: "/api/risk/:path*", destination: `${API}/api/risk/:path*` },
       { source: "/api/twin/:path*", destination: `${API}/api/twin/:path*` },
