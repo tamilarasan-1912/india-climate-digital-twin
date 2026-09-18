@@ -41,11 +41,22 @@ export default function ClimateMap({ layers, date = "2024-07-15", onStateSelect,
     });
     map.current = m;
     m.addControl(new NavigationControl({ showCompass: true }), "top-left");
+    m.setPitch(35);
     m.on("mousemove", e => coordCb.current?.(e.lngLat.lat, e.lngLat.lng));
 
     m.on("load", async () => {
       try {
         const current = latestLayers.current;
+        if (!m.getSource("india-terrain")) {
+          m.addSource("india-terrain", {
+            type: "raster-dem",
+            tiles: ["https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png"],
+            tileSize: 256,
+            encoding: "terrarium",
+            maxzoom: 14,
+          });
+          m.setTerrain({ source: "india-terrain", exaggeration: 1.0 });
+        }
         const states = await fetch(INDIA, { cache: "no-store" }).then(r => { if (!r.ok) throw new Error("India boundary data unavailable"); return r.json(); });
         m.addSource("india-states", { type: "geojson", data: states });
         m.addLayer({ id: "states-fill", type: "fill", source: "india-states", layout: { visibility: "visible" }, paint: { "fill-color": "#123042", "fill-opacity": 0.20 } });
