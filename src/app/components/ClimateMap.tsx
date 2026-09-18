@@ -98,12 +98,28 @@ export default function ClimateMap({ layers, date = "2024-07-15", onStateSelect,
         m.on("mouseenter", "states-fill", () => { m.getCanvas().style.cursor = "pointer"; });
         m.on("mouseleave", "states-fill", () => { m.getCanvas().style.cursor = ""; });
 
-        const keys: LayerKey[] = ["rainfall", "temperature", "lst", "sst", "anomalies", "risk", "events"];
+        // Rainfall is served as a provider-backed raster tile layer so the
+        // browser does not download the entire IMD point grid for every date.
+        m.addSource("climate-rainfall", {
+          type: "raster",
+          tiles: [`/api/climate/tiles/rainfall/${date}/{z}/{x}/{y}.png`],
+          tileSize: 256,
+          attribution: "IMD rainfall data",
+        });
+        m.addLayer({
+          id: "climate-rainfall",
+          type: "raster",
+          source: "climate-rainfall",
+          paint: { "raster-opacity": 0.68, "raster-fade-duration": 150 },
+          layout: { visibility: latestLayers.current.rainfall ? "visible" : "none" },
+        });
+
+        const keys: LayerKey[] = ["temperature", "lst", "sst", "anomalies", "risk", "events"];
         const payloads = await Promise.all(keys.map(async key => {
           try {
             const r = await fetch(`/api/gods-eye/layer/${key}/${date}`, { cache: "no-store" });
             return [key, r.ok ? await r.json() : null] as const;
-          } catch { return [key, null] as const; }
+          } catch { return [key, null] as const;
         }));
 
         for (const [key, payload] of payloads) {
