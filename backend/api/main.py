@@ -33,6 +33,7 @@ from backend.services.climate_layer_service import get_climate_layer_catalog, ge
 from backend.services.climate_provider import get_provider_registry, provider_config
 from backend.services.gods_eye_service import build_gods_eye_state, get_gods_eye_layer
 from backend.services.administrative_boundary_service import get_admin_metadata, get_districts, get_district_geojson
+from backend.services.climate_raster_service import raster_contract, tile_xyz_bounds
 from backend.services.gods_eye_operations_service import (
     build_gods_eye_timeline, build_gods_eye_events, build_gods_eye_operations,
 )
@@ -74,6 +75,17 @@ def climate_layer_status(layer: str, date: str = Query(..., min_length=10)): ret
 def climate_providers(): return get_provider_registry()
 @app.get("/api/climate/providers/{layer}")
 def climate_provider(layer: str): return _call(provider_config, layer)
+
+@app.get("/api/climate/raster-contract/{layer}")
+def climate_raster_contract(layer: str, date: str = Query(..., min_length=10)):
+    definition = _call(get_climate_layer_catalog)["layers"].get(layer)
+    if not definition:
+        raise HTTPException(status_code=404, detail=f"Unknown climate layer: {layer}")
+    return raster_contract(layer=layer, provider=", ".join(definition["providers"]), variable=definition["variables"][0], units="provider-defined", source_path=None, date=date)
+
+@app.get("/api/climate/tile-bounds/{z}/{x}/{y}")
+def climate_tile_bounds(z: int, x: int, y: int):
+    return {"z": z, "x": x, "y": y, "bbox": tile_xyz_bounds(z, x, y), "crs": "EPSG:4326"}
 
 # -------------------- GOD'S-EYE OPERATIONS --------------------
 @app.get("/api/gods-eye/state")
