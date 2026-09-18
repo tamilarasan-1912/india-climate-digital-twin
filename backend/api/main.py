@@ -32,8 +32,11 @@ from backend.api.ogc_routes import router as ogc_router
 from backend.services.climate_layer_service import get_climate_layer_catalog, get_layer_status, unavailable_layer
 from backend.services.climate_provider import get_provider_registry, provider_config
 from backend.services.gods_eye_service import build_gods_eye_state, get_gods_eye_layer
+from backend.services.gods_eye_operations_service import (
+    build_gods_eye_timeline, build_gods_eye_events, build_gods_eye_operations,
+)
 
-app = FastAPI(title="India Climate Digital Twin API", description="Operational scientific API for the India Climate Digital Twin.", version="1.4.0")
+app = FastAPI(title="India Climate Digital Twin API", description="Operational scientific API for the India Climate Digital Twin.", version="1.5.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 app.include_router(platform_router)
 app.include_router(ogc_router)
@@ -54,7 +57,7 @@ def _call(function, *args, **kwargs):
 
 @app.get("/")
 def root():
-    return {"project": "India Climate Digital Twin", "status": "online", "engine": "Python + FastAPI + India Climate Twin Core", "version": "1.4.0"}
+    return {"project": "India Climate Digital Twin", "status": "online", "engine": "Python + FastAPI + India Climate Twin Core", "version": "1.5.0"}
 
 @app.get("/api/status")
 def status(): return get_system_health()
@@ -62,40 +65,42 @@ def status(): return get_system_health()
 def health(): return get_system_health()
 @app.get("/api/climate/variables")
 def climate_variables(): return {"variables": CLIMATE_VARIABLES}
-
 @app.get("/api/climate/layers")
 def climate_layers(): return get_climate_layer_catalog()
-
 @app.get("/api/climate/layers/{layer}")
 def climate_layer_status(layer: str, date: str = Query(..., min_length=10)): return _call(get_layer_status, layer, date)
-
 @app.get("/api/climate/providers")
 def climate_providers(): return get_provider_registry()
-
 @app.get("/api/climate/providers/{layer}")
 def climate_provider(layer: str): return _call(provider_config, layer)
 
+# -------------------- GOD'S-EYE OPERATIONS --------------------
 @app.get("/api/gods-eye/state")
 def gods_eye_state(date: str = Query(..., min_length=10)):
-    """Single payload for the live India climate God's-Eye console."""
     return _call(build_gods_eye_state, date)
-
 
 @app.get("/api/gods-eye/layer/{layer}/{date}")
 def gods_eye_layer(layer: str, date: str):
-    """Spatial layer contract used by the map; no-data remains explicit."""
     return _call(get_gods_eye_layer, layer, date)
 
+@app.get("/api/gods-eye/timeline")
+def gods_eye_timeline(start: str = Query(..., min_length=10), end: str = Query(..., min_length=10), forecast_horizon: int = Query(default=7, ge=1, le=14)):
+    return _call(build_gods_eye_timeline, start, end, forecast_horizon)
+
+@app.get("/api/gods-eye/events/{date}")
+def gods_eye_events(date: str):
+    return _call(build_gods_eye_events, date)
+
+@app.get("/api/gods-eye/operations/{date}")
+def gods_eye_operations(date: str):
+    return _call(build_gods_eye_operations, date)
 
 @app.get("/api/climate/temperature/{date}")
 def climate_temperature(date: str): return unavailable_layer("temperature", date)
-
 @app.get("/api/climate/lst/{date}")
 def climate_lst(date: str): return unavailable_layer("lst", date)
-
 @app.get("/api/climate/sst/{date}")
 def climate_sst(date: str): return unavailable_layer("sst", date)
-
 @app.get("/api/climate/anomalies/{date}")
 def climate_anomalies(date: str): return unavailable_layer("anomalies", date)
 
@@ -112,16 +117,10 @@ def risk_contract(): return get_risk_contract()
 def india_hierarchy(): return get_india_hierarchy()
 @app.get("/api/india/location/{location_id}")
 def india_location(location_id: str): return _call(resolve_location, location_id)
-
 @app.get("/api/india/state/{state_id}/districts")
 def india_state_districts(state_id: str):
     location = _call(resolve_location, state_id)
-    return {
-        "state": location,
-        "districts": [],
-        "status": "provider_required",
-        "data_status": "District boundaries and climate metrics require a validated administrative dataset; no district values are fabricated.",
-    }
+    return {"state": location, "districts": [], "status": "provider_required", "data_status": "District boundaries and climate metrics require a validated administrative dataset; no district values are fabricated."}
 
 # -------------------- STATE CLIMATE TWIN --------------------
 @app.get("/api/india/states/climate/{date}")
