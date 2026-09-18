@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.config.climate_config import CLIMATE_VARIABLES
@@ -33,7 +33,8 @@ from backend.services.climate_layer_service import get_climate_layer_catalog, ge
 from backend.services.climate_provider import get_provider_registry, provider_config
 from backend.services.gods_eye_service import build_gods_eye_state, get_gods_eye_layer
 from backend.services.administrative_boundary_service import get_admin_metadata, get_districts, get_district_geojson
-from backend.services.climate_raster_service import raster_contract, tile_xyz_bounds
+from backend.services.climate_raster_service import raster_contract, tile_xyz_bounds, render_rainfall_xyz_tile
+
 from backend.services.gods_eye_operations_service import (
     build_gods_eye_timeline, build_gods_eye_events, build_gods_eye_operations,
 )
@@ -86,6 +87,17 @@ def climate_raster_contract(layer: str, date: str = Query(..., min_length=10)):
 @app.get("/api/climate/tile-bounds/{z}/{x}/{y}")
 def climate_tile_bounds(z: int, x: int, y: int):
     return {"z": z, "x": x, "y": y, "bbox": tile_xyz_bounds(z, x, y), "crs": "EPSG:4326"}
+
+@app.get("/api/climate/tiles/rainfall/{date}/{z}/{x}/{y}.png")
+def rainfall_xyz_tile(date: str, z: int, x: int, y: int):
+    from backend.services.rainfall_service import DATA_FILE
+    if not DATA_FILE.exists():
+        raise HTTPException(status_code=503, detail="IMD rainfall source dataset is unavailable")
+    return Response(
+        content=_call(render_rainfall_xyz_tile, DATA_FILE, date, z, x, y),
+        media_type="image/png",
+        headers={"Cache-Control": "public, max-age=3600"},
+    )
 
 # -------------------- GOD'S-EYE OPERATIONS --------------------
 @app.get("/api/gods-eye/state")
