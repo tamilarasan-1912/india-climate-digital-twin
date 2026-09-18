@@ -30,6 +30,7 @@ from backend.api.forecast_state_routes import generate_prithvi_forecast
 from backend.api.platform_routes import router as platform_router
 from backend.api.ogc_routes import router as ogc_router
 from backend.services.climate_layer_service import get_climate_layer_catalog, get_layer_status, unavailable_layer
+from backend.services.climate_provider import get_provider_registry, provider_config
 
 app = FastAPI(title="India Climate Digital Twin API", description="Operational scientific API for the India Climate Digital Twin.", version="1.4.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
@@ -66,6 +67,12 @@ def climate_layers(): return get_climate_layer_catalog()
 
 @app.get("/api/climate/layers/{layer}")
 def climate_layer_status(layer: str, date: str = Query(..., min_length=10)): return _call(get_layer_status, layer, date)
+
+@app.get("/api/climate/providers")
+def climate_providers(): return get_provider_registry()
+
+@app.get("/api/climate/providers/{layer}")
+def climate_provider(layer: str): return _call(provider_config, layer)
 
 @app.get("/api/climate/temperature/{date}")
 def climate_temperature(date: str): return unavailable_layer("temperature", date)
