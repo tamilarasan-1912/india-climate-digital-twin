@@ -32,6 +32,7 @@ from backend.api.ogc_routes import router as ogc_router
 from backend.services.climate_layer_service import get_climate_layer_catalog, get_layer_status, unavailable_layer
 from backend.services.climate_provider import get_provider_registry, provider_config
 from backend.services.gods_eye_service import build_gods_eye_state, get_gods_eye_layer
+from backend.services.administrative_boundary_service import get_admin_metadata, get_districts, get_district_geojson
 from backend.services.gods_eye_operations_service import (
     build_gods_eye_timeline, build_gods_eye_events, build_gods_eye_operations,
 )
@@ -117,10 +118,21 @@ def risk_contract(): return get_risk_contract()
 def india_hierarchy(): return get_india_hierarchy()
 @app.get("/api/india/location/{location_id}")
 def india_location(location_id: str): return _call(resolve_location, location_id)
+@app.get("/api/india/admin/metadata")
+def india_admin_metadata(): return _call(get_admin_metadata)
+
+@app.get("/api/india/districts")
+def india_districts(state: str | None = Query(default=None, min_length=2)):
+    return _call(get_districts, state)
+
+@app.get("/api/india/districts/geojson")
+def india_districts_geojson(state: str | None = Query(default=None, min_length=2)):
+    return _call(get_district_geojson, state)
+
 @app.get("/api/india/state/{state_id}/districts")
 def india_state_districts(state_id: str):
     location = _call(resolve_location, state_id)
-    return {"state": location, "districts": [], "status": "provider_required", "data_status": "District boundaries and climate metrics require a validated administrative dataset; no district values are fabricated."}
+    return _call(get_districts, location["name"])
 
 # -------------------- STATE CLIMATE TWIN --------------------
 @app.get("/api/india/states/climate/{date}")
