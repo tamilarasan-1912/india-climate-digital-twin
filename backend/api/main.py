@@ -28,10 +28,13 @@ from backend.services.prithvi_preprocessing_service import inspect_preprocessing
 from backend.services.risk_contract import get_risk_contract
 from backend.api.forecast_state_routes import generate_prithvi_forecast
 from backend.api.platform_routes import router as platform_router
+from backend.api.ogc_routes import router as ogc_router
+from backend.services.climate_layer_service import get_climate_layer_catalog, get_layer_status, unavailable_layer
 
-app = FastAPI(title="India Climate Digital Twin API", description="Operational scientific API for the India Climate Digital Twin.", version="1.3.0")
+app = FastAPI(title="India Climate Digital Twin API", description="Operational scientific API for the India Climate Digital Twin.", version="1.4.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 app.include_router(platform_router)
+app.include_router(ogc_router)
 
 
 def _call(function, *args, **kwargs):
@@ -57,6 +60,24 @@ def status(): return get_system_health()
 def health(): return get_system_health()
 @app.get("/api/climate/variables")
 def climate_variables(): return {"variables": CLIMATE_VARIABLES}
+
+@app.get("/api/climate/layers")
+def climate_layers(): return get_climate_layer_catalog()
+
+@app.get("/api/climate/layers/{layer}")
+def climate_layer_status(layer: str, date: str = Query(..., min_length=10)): return _call(get_layer_status, layer, date)
+
+@app.get("/api/climate/temperature/{date}")
+def climate_temperature(date: str): return unavailable_layer("temperature", date)
+
+@app.get("/api/climate/lst/{date}")
+def climate_lst(date: str): return unavailable_layer("lst", date)
+
+@app.get("/api/climate/sst/{date}")
+def climate_sst(date: str): return unavailable_layer("sst", date)
+
+@app.get("/api/climate/anomalies/{date}")
+def climate_anomalies(date: str): return unavailable_layer("anomalies", date)
 
 # -------------------- DIGITAL TWIN CONTRACT --------------------
 @app.get("/api/twin/contract")
