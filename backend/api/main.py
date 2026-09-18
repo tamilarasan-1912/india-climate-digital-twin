@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from fastapi import FastAPI, HTTPException, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
+import os
+from datetime import datetime, timezone
 
 from backend.config.climate_config import CLIMATE_VARIABLES
 from backend.services.rainfall_service import (
@@ -40,7 +42,10 @@ from backend.services.gods_eye_operations_service import (
 )
 
 app = FastAPI(title="India Climate Digital Twin API", description="Operational scientific API for the India Climate Digital Twin.", version="1.5.0")
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
+_cors_origins = [origin.strip() for origin in os.getenv("CORS_ALLOWED_ORIGINS", "").split(",") if origin.strip()]
+if not _cors_origins:
+    _cors_origins = ["http://localhost:3000"]
+app.add_middleware(CORSMiddleware, allow_origins=_cors_origins, allow_credentials=True, allow_methods=["GET", "POST", "OPTIONS"], allow_headers=["Content-Type", "Authorization"])
 app.include_router(platform_router)
 app.include_router(ogc_router)
 
@@ -64,8 +69,16 @@ def root():
 
 @app.get("/api/status")
 def status(): return get_system_health()
+
 @app.get("/api/health")
 def health(): return get_system_health()
+
+@app.get("/api/ready")
+def readiness():
+    health_state = get_system_health()
+    required = health_state.get("checks", {})
+    ready = bool(required.get("imd_rainfall") and required.get("twin_state") and required.get("fused_features"))
+    return {"status": "ready" if ready else "not_ready", "timestamp": datetime.now(timezone.utc).isoformat(), "checks": required, "api_version": app.version}
 @app.get("/api/climate/variables")
 def climate_variables(): return {"variables": CLIMATE_VARIABLES}
 @app.get("/api/climate/layers")
