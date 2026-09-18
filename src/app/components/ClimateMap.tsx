@@ -10,13 +10,14 @@ type Props = {
   date?: string;
   onStateSelect?: (name: string) => void;
   onCoords?: (lat: number, lon: number) => void;
+  selectedState?: string;
   zoomRequest?: { type: "in" | "out" | "reset"; nonce: number };
 };
 
 const INDIA = "/data/india/india-states.geojson";
 const FIT: [[number, number], [number, number]] = [[68, 6], [97, 36]];
 
-export default function ClimateMap({ layers, date = "2024-07-15", onStateSelect, onCoords, zoomRequest }: Props) {
+export default function ClimateMap({ layers, date = "2024-07-15", onStateSelect, onCoords, zoomRequest, selectedState = "INDIA" }: Props) {
   const el = useRef<HTMLDivElement | null>(null);
   const map = useRef<Map | null>(null);
   const latestLayers = useRef(layers);
@@ -171,6 +172,40 @@ export default function ClimateMap({ layers, date = "2024-07-15", onStateSelect,
 
   useEffect(() => {
     const m = map.current;
+    if (!m || !m.isStyleLoaded() || !selectedState || selectedState.toUpperCase() === "INDIA") {
+      if (m?.getLayer("india-district-fill")) m.setLayoutProperty("india-district-fill", "visibility", "none");
+      if (m?.getLayer("india-district-outline")) m.setLayoutProperty("india-district-outline", "visibility", "none");
+      return;
+    }
+    let alive = true;
+    fetch(`/api/india/districts/geojson?state=${encodeURIComponent(selectedState)}`, { cache: "no-store" })
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (!alive || !data?.features?.length) return;
+        const sourceId = "india-districts";
+        const source = m.getSource(sourceId);
+        if (source && "setData" in source) (source as any).setData(data);
+        else {
+          m.addSource(sourceId, { type: "geojson", data });
+          m.addLayer({ id: "india-district-fill", type: "fill", source: sourceId, paint: { "fill-color": "#0e5c72", "fill-opacity": 0.12 }, layout: { visibility: "visible" } });
+          m.addLayer({ id: "india-district-outline", type: "line", source: sourceId, paint: { "line-color": "#65d7ef", "line-width": 0.65, "line-opacity": 0.65 }, layout: { visibility: "visible" } });
+          m.on("click", "india-district-fill", e => {
+            const p = e.features?.[0]?.properties as Record<string, unknown> | undefined;
+            const name = String(p?.shapeName ?? p?.NAME_2 ?? "District");
+            new Popup({ closeButton: true }).setLngLat(e.lngLat).setHTML(`<strong>${escapeHtml(name)}</strong><br/><small>DISTRICT GEOMETRY · CLIMATE METRICS PROVIDER REQUIRED</small>`).addTo(m);
+          });
+        }
+        if (m.getLayer("india-district-fill")) m.setLayoutProperty("india-district-fill", "visibility", "visible");
+        if (m.getLayer("india-district-outline")) m.setLayoutProperty("india-district-outline", "visibility", "visible");
+        const bbox = featureBounds(data.features);
+        if (bbox) m.fitBounds(bbox, { padding: 70, maxZoom: 7.2, duration: 700 });
+      })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, [selectedState]);
+
+  useEffect(() => {
+    const m = map.current;
     if (!m || !zoomRequest) return;
     if (zoomRequest.type === "in") m.zoomIn({ duration: 250 });
     if (zoomRequest.type === "out") m.zoomOut({ duration: 250 });
@@ -183,4 +218,18 @@ export default function ClimateMap({ layers, date = "2024-07-15", onStateSelect,
 function escapeHtml(value: string) {
   return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;").replaceAll("'", "&#039;");
+}
+
+function featureBounds(features: any[]): [[number, number], [number, number]] | null {
+  let minLon = Infinity, minLat = Infinity, maxLon = -Infinity, maxLat = -Infinity;
+  const visit = (coords: any): void => {
+    if (!Array.isArray(coords)) return;
+    if (typeof coords[0] === "number" && typeof coords[1] === "number") {
+      minLon = Math.min(minLon, coords[0]); maxLon = Math.max(maxLon, coords[0]);
+      minLat = Math.min(minLat, coords[1]); maxLat = Math.max(maxLat, coords[1]); return;
+    }
+    for (const child of coords) visit(child);
+  };
+  for (const feature of features) visit(feature?.geometry?.coordinates);
+  return Number.isFinite(minLon) ? [[minLon, minLat], [maxLon, maxLat]] : null;
 }
