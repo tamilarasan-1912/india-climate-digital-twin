@@ -135,3 +135,61 @@ def discover_netcdf(path: str | Path) -> dict[str, Any]:
             "coordinates": sorted(ds.coords),
             "sizes": {k: int(v) for k, v in ds.sizes.items()},
         }
+
+def render_rainfall_xyz_tile(
+    dataset_path: str | Path,
+    date: str,
+    z: int,
+    x: int,
+    y: int,
+    size: int = 256,
+) -> bytes:
+    """Render a validated rainfall grid into a transparent PNG XYZ tile.
+
+    This is a provider-backed renderer: if the source NetCDF is absent or the
+    requested date is absent, it raises instead of creating synthetic values.
+    """
+    from io import BytesIO
+    from PIL import Image
+
+    if size not in (256, 512):
+        raise ValueError("Tile size must be 256 or 512")
+    west, south, east, north = tile_xyz_bounds(z, x, y)
+    with xr.open_dataset(dataset_path) as ds:
+        variable = "RAINFALL"
+        if variable not in ds:
+            raise ValueError("Rainfall variable RAINFALL is missing")
+        try:
+            da = ds[variable].sel(TIME=date)
+        except Exception as exc:
+            raise ValueError(f"Rainfall date '{date}' is unavailable") from exc
+        lat_name, lon_name = "LATITUDE", "LONGITUDE"
+        lat = np.asarray(ds[lat_name].values, dtype=float)
+        lon = np.asarray(ds[lon_name].values, dtype=float)
+        values = np.asarray(da.values, dtype=float)
+        if values.ndim != 2:
+            raise ValueError("Rainfall tile renderer requires a 2-D daily grid")
+        if lat[0] > lat[-1]:
+            lat = lat[::-1]
+            values = values[::-1, :]
+        # Web-map pixel centers.
+        px = np.linspace(west, east, size, endpoint=False) + (east - west) / (2 * size)
+        py = np.linspace(north, south, size, endpoint=False) - (north - south) / (2 * size)
+        lon_idx = np.searchsorted(lon, px).clip(1, len(lon) - 1)
+        lon_idx = np.where(np.abs(lon[lon_idx] - px) < np.abs(lon[lon_idx - 1] - px), lon_idx, lon_idx - 1)
+        lat_idx = np.searchsorted(lat, py).clip(1, len(lat) - 1)
+        lat_idx = np.where(np.abs(lat[lat_idx] - py) < np.abs(lat[lat_idx - 1] - py), lat_idx, lat_idx - 1)
+        grid = values[np.ix_(lat_idx, lon_idx)]
+        valid = np.isfinite(grid) & (grid >= 0) & (grid <= 10000)
+        rgba = np.zeros((size, size, 4), dtype=np.uint8)
+        if np.any(valid):
+            # Stable visualization ramp; values remain provider-derived.
+            t = np.clip(grid / 100.0, 0.0, 1.0)
+            rgba[..., 0] = np.where(valid, (255 * t).astype(np.uint8), 0)
+            rgba[..., 1] = np.where(valid, (220 * (1.0 - t)).astype(np.uint8), 0)
+            rgba[..., 2] = np.where(valid, 255 - rgba[..., 0] // 2, 0)
+            rgba[..., 3] = np.where(valid, 210, 0)
+        image = Image.fromarray(rgba, mode="RGBA")
+        buf = BytesIO()
+        image.save(buf, format="PNG", optimize=True)
+        return buf.getvalue()
