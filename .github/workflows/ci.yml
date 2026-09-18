@@ -43,6 +43,8 @@ jobs:
               'backend.services.dataset_catalog',
               'backend.services.alert_service',
               'backend.services.flood_twin_service',
+              'backend.services.climate_layer_service',
+              'backend.api.ogc_routes',
           ]
           for mod in mods:
               importlib.import_module(mod)
