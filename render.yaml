@@ -9,5 +9,5 @@ services:
     envVars:
       - key: PYTHON_VERSION
         value: 3.12.0
-      - key: FRONTEND_ORIGIN
+      - key: CORS_ALLOWED_ORIGINS
         sync: false

@@ -120,6 +120,7 @@ export default function ClimateMap({ layers, date = "2024-07-15", onStateSelect,
             const r = await fetch(`/api/gods-eye/layer/${key}/${date}`, { cache: "no-store" });
             return [key, r.ok ? await r.json() : null] as const;
           } catch { return [key, null] as const;
+          }
         }));
 
         for (const [key, payload] of payloads) {

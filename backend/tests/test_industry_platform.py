@@ -40,7 +40,10 @@ class IndustryPlatformTests(unittest.TestCase):
             population_scale=10_000,
             economic_scale_inr=100_000_000,
         )
-        self.assertAlmostEqual(result["composite_exposure_index"], 0.55)
+        # The screening index is the equal-weight mean of the three supplied,
+        # normalized exposure components. Data quality is reported separately
+        # and missing components are excluded rather than treated as zero.
+        self.assertAlmostEqual(result["composite_exposure_index"], 1 / 3)
         self.assertEqual(result["status"], "screening_only")
         self.assertEqual(result["source_ids"], ["census-source", "asset-register"])
 

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 
 type TwinSummary = { state_dimension: number; observations: number; dates: string[]; fused_feature_dimension: number; status: string; scientific_note: string };
 type Forecast = { date: string; rainfall_mm: number; model: string };
@@ -53,7 +54,7 @@ export default function OperationsPage() {
   return <main style={{minHeight:"100vh",background:"#07111b",color:"#dbeafe",fontFamily:"ui-monospace, SFMono-Regular, Menlo, monospace",padding:24}}>
     <header style={{display:"flex",justifyContent:"space-between",alignItems:"center",borderBottom:"1px solid #263748",paddingBottom:18}}>
       <div><div style={{fontSize:26,fontWeight:800,color:"#67d5ff"}}>INDIA CLIMATE DIGITAL TWIN</div><div style={{fontSize:11,opacity:.65,marginTop:5}}>OPERATIONAL SCIENTIFIC CONTROL ROOM</div></div>
-      <a href="/" style={{color:"#67d5ff",textDecoration:"none",border:"1px solid #2b6075",padding:"8px 14px"}}>← MAIN TWIN</a>
+       <Link href="/" style={{color:"#67d5ff",textDecoration:"none",border:"1px solid #2b6075",padding:"8px 14px"}}>← MAIN TWIN</Link>
     </header>
 
     {error && <div style={{marginTop:16,padding:12,border:"1px solid #8b3a3a",background:"#241316",color:"#fecaca",fontSize:12}}>{error}</div>}
