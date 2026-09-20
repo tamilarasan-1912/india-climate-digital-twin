@@ -243,3 +243,57 @@ class DistrictAssistantTest(unittest.TestCase):
 
         intents = get_intelligence_capabilities()["supported_intents"]
         self.assertIn("district-level rainfall aggregation", intents)
+
+    def test_district_ranking_question_returns_ranked_districts(self):
+        from backend.services.climate_intelligence_service import answer_question
+
+        answer = answer_question(
+            "Which districts in Tamil Nadu had the most rainfall on this date?", self.DATE
+        )
+        self.assertEqual(answer["status"], "AVAILABLE")
+        self.assertEqual(answer["state_id"], "IN-TN")
+        ranked = answer["ranked_districts"]
+        self.assertTrue(ranked)
+        # Ranking is by maximum rainfall, descending.
+        maxima = [row["maximum_rainfall_mm"] for row in ranked]
+        self.assertEqual(maxima, sorted(maxima, reverse=True))
+
+    def test_district_ranking_top_value_matches_state_maximum(self):
+        """The ranked top district must reconcile with the state aggregate."""
+        from backend.services.climate_intelligence_service import answer_question
+        from backend.services.state_twin_service import get_all_state_climate_metrics
+
+        answer = answer_question(
+            "Which districts in Tamil Nadu had the highest rainfall on this date?", self.DATE
+        )
+        state = next(
+            item
+            for item in get_all_state_climate_metrics(self.DATE)["states"]
+            if item["state_id"] == "IN-TN"
+        )
+        # The state maximum is the max over grid cells, so no district can
+        # exceed it and the top district should reach it here.
+        self.assertLessEqual(answer["ranked_districts"][0]["maximum_rainfall_mm"], state["maximum_rainfall_mm"])
+        self.assertAlmostEqual(
+            answer["ranked_districts"][0]["maximum_rainfall_mm"],
+            state["maximum_rainfall_mm"],
+            places=3,
+        )
+
+    def test_plain_state_question_is_not_treated_as_a_ranking(self):
+        from backend.services.climate_intelligence_service import answer_question
+
+        answer = answer_question("What was rainfall in Tamil Nadu on this date?", self.DATE)
+        self.assertNotIn("ranked_districts", answer)
+        self.assertIn("metrics", answer)
+
+    def test_ranking_outside_dataset_coverage_raises_instead_of_ranking(self):
+        from backend.services.climate_intelligence_service import answer_question
+
+        # 1970 is outside IMD dataset coverage. The service must refuse rather
+        # than return an empty or fabricated ranking (the API maps this to 400).
+        with self.assertRaises(ValueError):
+            answer_question(
+                "Which districts in Tamil Nadu had the most rainfall on 1970-01-01?",
+                "1970-01-01",
+            )

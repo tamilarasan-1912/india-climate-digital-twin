@@ -17,6 +17,7 @@ from backend.services.climate_layer_service import CLIMATE_LAYERS, get_layer_sta
 from backend.services.climate_provider import provider_config
 from backend.services.climate_provider_runtime import get_provider_layer
 from backend.services.climate_risk_service import get_climate_risk_summary
+from backend.services.district_climate_service import get_state_district_climate_metrics
 from backend.services.extreme_event_service import get_extreme_event_summary
 from backend.services.rainfall_service import get_daily_statistics, get_india_daily_summary
 from backend.services.state_twin_service import get_all_state_climate_metrics
@@ -121,6 +122,57 @@ def _summarise_state(date: str, question: str, state_id: str) -> dict[str, Any]:
             "processing": "state_polygon_grid_aggregation",
             "status": "validated",
         },
+    }
+
+
+def _summarise_state_district_ranking(date: str, question: str, state_id: str) -> dict[str, Any]:
+    """Rank a state's districts by observed rainfall for a date.
+
+    This answers "which districts had the most rainfall" from the same IMD grid
+    aggregation used everywhere else; districts with no grid-point centre are
+    excluded from the ranking rather than given a substituted value.
+    """
+    result = get_state_district_climate_metrics(date, state_id)
+    rows = [row for row in result["districts"] if row["valid_grid_cells"]]
+    if not rows:
+        return {
+            "answer": (
+                f"No validated district rainfall aggregation is available for {result['state_name']} "
+                f"on {date}."
+            ),
+            "status": "NO_DATA",
+            "data_available": False,
+            "question": question,
+            "layer": "rainfall",
+            "date": date,
+            "state_id": result["state_id"],
+            "source": "IMD",
+        }
+    ranked = sorted(rows, key=lambda row: row["maximum_rainfall_mm"], reverse=True)
+    top = ranked[:5]
+    listing = "; ".join(
+        f"{row['district_name']} {row['maximum_rainfall_mm']} mm" for row in top
+    )
+    without_coverage = result["count"] - result["districts_with_data"]
+    return {
+        "answer": (
+            f"Wettest districts in {result['state_name']} on {date} by maximum rainfall: {listing}. "
+            f"Ranked from {len(rows)} districts with IMD grid coverage "
+            f"({without_coverage} of {result['count']} districts reported no grid coverage)."
+        ),
+        "status": "AVAILABLE",
+        "data_available": True,
+        "question": question,
+        "layer": "rainfall",
+        "date": date,
+        "state_id": result["state_id"],
+        "state_name": result["state_name"],
+        "ranked_districts": top,
+        "districts_ranked": len(rows),
+        "districts_without_grid_coverage": without_coverage,
+        "aggregation_method": result["aggregation_method"],
+        "source": "IMD",
+        "provenance": result["provenance"],
     }
 
 
@@ -416,7 +468,14 @@ def answer_question(question: str, date: str, layer: str = "rainfall") -> dict[s
     district_id = _district_mentioned(question)
     if district_id and ("district" in q or district_id):
         return _summarise_district(date, question, district_id)
-    for state_id in _states_mentioned(q):
+    # "Which districts in <state> had the most rainfall" is a ranking request,
+    # not a request for the state total.
+    states = _states_mentioned(q)
+    if states and ("district" in q or "which district" in q) and any(
+        word in q for word in ("most", "wettest", "highest", "maximum", "top", "rank")
+    ):
+        return _summarise_state_district_ranking(date, question, states[0])
+    for state_id in states:
         return _summarise_state(date, question, state_id)
     if key == "rainfall" and "risk" in q:
         return _summarise_risk(date, question)
@@ -441,6 +500,7 @@ def get_intelligence_capabilities() -> dict[str, Any]:
             "national rainfall observation",
             "state-level rainfall aggregation",
             "district-level rainfall aggregation",
+            "district rainfall ranking within a state",
             "rainfall-hazard risk summary",
             "extreme rainfall events",
             "provider-backed temperature/LST/SST/anomaly lookup",
