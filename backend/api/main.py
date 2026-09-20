@@ -48,6 +48,12 @@ from backend.services.auth_service import require_operator
 from backend.services.rate_limiter import enforce_rate_limit
 from backend.services.gods_eye_service import build_gods_eye_state, get_gods_eye_layer
 from backend.services.administrative_boundary_service import get_admin_metadata, get_districts, get_district_geojson
+from backend.services.district_climate_service import (
+    get_all_district_climate_metrics,
+    get_district_climate_metrics,
+    get_district_geometry_coverage,
+    get_state_district_climate_metrics,
+)
 from backend.services.climate_raster_service import raster_contract, tile_xyz_bounds, render_rainfall_xyz_tile
 
 from backend.services.gods_eye_operations_service import (
@@ -217,7 +223,7 @@ def system_status():
         "forecast": capability("AVAILABLE", model="7-day moving-average baseline", calibrated=False),
         "prithvi_wxc": capability("BLOCKED" if not prithvi_state["inference_ready"] else "CONNECTED", **prithvi_state),
         "validation": capability("VALIDATION REQUIRED", note="baseline rainfall forecast metrics available; no calibrated AI forecast metrics"),
-        "district_climate": capability("PROVIDER REQUIRED", note="district geometry available; district climate aggregation not connected"),
+        "district_climate": capability("AVAILABLE", note="district rainfall aggregated from real IMD grid cells covered by geoBoundaries ADM2 polygons; districts without intersecting grid centres report no_grid_coverage"),
         "flood_twin": capability("BLOCKED", note="no validated hydraulic model configured"),
         "ocean_and_land_layers": {
             key: capability("PROVIDER REQUIRED" if layer_catalog[key]["status"] != "connected" else "CONNECTED")
@@ -346,6 +352,22 @@ def india_states_climate(date: str): return _call(get_all_state_climate_metrics,
 def india_state_climate(state_id: str, date: str): return _call(get_state_climate_metrics, date, state_id)
 @app.get("/api/india/state/{state_id}/twin/{date}")
 def india_state_twin(state_id: str, date: str): return _call(get_state_twin, date, state_id)
+
+# -------------------- DISTRICT CLIMATE --------------------
+# Aggregated from real IMD grid cells covered by real geoBoundaries ADM2 polygons.
+@app.get("/api/india/districts/coverage")
+def india_district_coverage(): return _call(get_district_geometry_coverage)
+
+@app.get("/api/india/districts/climate/{date}")
+def india_districts_climate(date: str): return _call(get_all_district_climate_metrics, date)
+
+@app.get("/api/india/state/{state_id}/districts/climate/{date}")
+def india_state_districts_climate(state_id: str, date: str):
+    return _call(get_state_district_climate_metrics, date, state_id)
+
+@app.get("/api/india/district/{district_id}/climate/{date}")
+def india_district_climate(district_id: str, date: str):
+    return _call(get_district_climate_metrics, date, district_id)
 
 # -------------------- RAINFALL --------------------
 @app.get("/api/rainfall/info")

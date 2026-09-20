@@ -131,6 +131,27 @@ def get_districts(state_name: str | None = None) -> dict[str, Any]:
     }
 
 
+def list_district_geometries() -> list[dict[str, Any]]:
+    """Return district geometry with stable identifiers for spatial aggregation.
+
+    Each item exposes ``id``, ``name``, ``state`` and the parsed Shapely
+    ``geometry`` so climate services can intersect real observations with real
+    polygons without re-parsing the source GeoJSON.
+    """
+    result: list[dict[str, Any]] = []
+    for feature in _joined_districts():
+        geometry = shape(feature["geometry"])
+        props = feature["properties"]
+        result.append({
+            "id": _prop(props, "shapeID", "shapeISO") or f"district-{len(result) + 1}",
+            "name": _prop(props, "shapeName", "NAME_2", "district", "DISTRICT") or "Unnamed district",
+            "state": props.get("parent_state"),
+            "level": "district",
+            "geometry": geometry,
+        })
+    return result
+
+
 def get_district_geojson(state_name: str | None = None) -> dict[str, Any]:
     features = list(_joined_districts())
     if state_name:

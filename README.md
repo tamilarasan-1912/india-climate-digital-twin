@@ -15,6 +15,8 @@ The twin is not a static map and not merely an AI model. Every operational resul
 - Next.js + React frontend with MapLibre-based map UI
 - FastAPI + Xarray scientific backend
 - IMD rainfall NetCDF ingestion, statistics, grids and GeoJSON
+- State-level rainfall aggregation over real IMD grid cells covered by real state polygons
+- District-level rainfall aggregation over real IMD grid cells covered by real geoBoundaries ADM2 polygons
 - Extreme rainfall classification and spatial event layers
 - Rainfall hazard-risk scoring and validation
 - Chennai Sentinel-2 historical archive and validated Prithvi-EO input pipeline
@@ -41,6 +43,12 @@ The twin is not a static map and not merely an AI model. Every operational resul
 | What If | `/api/twin/what-if?...` |
 | Twin vector | `/api/twin/state` |
 | Risk contract | `/api/risk/contract` |
+| State climate aggregation | `/api/india/state/{state_id}/climate/{date}` |
+| All-state climate aggregation | `/api/india/states/climate/{date}` |
+| State district rollup | `/api/india/state/{state_id}/districts/climate/{date}` |
+| National district aggregation | `/api/india/districts/climate/{date}` |
+| Single district aggregation | `/api/india/district/{district_id}/climate/{date}` |
+| District geometry coverage | `/api/india/districts/coverage` |
 | Industry capabilities | `/api/v1/platform/capabilities` |
 | Asset create/update | `POST /api/v1/assets` |
 | Asset lookup | `GET /api/v1/assets/{asset_id}` |
@@ -97,6 +105,39 @@ The repository includes `database/migrations/001_industry_core.sql` and a local 
 - Flood depth/inundation is not generated until a validated hydraulic model and required terrain/boundary data are connected.
 - Long-term 2030/2050/2100 scenarios require validated climate projection datasets and are not implied by simple perturbations.
 - Large model weights and climate archives are external dependencies; normal API requests must not download multi-GB assets.
+
+## Implementation status matrix
+
+Completion model: `IMPLEMENTED` (code exists) → `CONNECTED` (real data flows)
+→ `VALIDATED` (tested against real data) → `PRODUCTION_READY`.
+
+| Area | Implemented | Connected | Validated | Notes |
+|---|---|---|---|---|
+| IMD rainfall | Yes | Yes | Yes | `RF25_ind2024_rfp25.nc`, 366 days, 129×135 grid |
+| State aggregation | Yes | Yes | Yes | 34/36 states; 2 island UTs have no grid centre |
+| District aggregation | Yes | Yes | Yes | 702/735 districts; 33 report `no_grid_coverage` |
+| Rainfall risk | Yes | Yes | Yes | Rainfall-only hazard screening |
+| Extreme events | Yes | Yes | Yes | IMD-derived rainfall thresholds |
+| Forecasting | Yes | Yes | Partial | 7-day moving-average baseline; not AI-calibrated |
+| Temperature | Yes | No | No | `PROVIDER REQUIRED` — adapter ready, no endpoint |
+| LST / SST | Yes | No | No | `PROVIDER REQUIRED` |
+| Anomalies | Yes | No | No | Requires validated climatology + observation |
+| Prithvi-WxC | Yes | No | Blocked | Checkpoint, PyTorch, scalers, MERRA-2 absent |
+| Flood twin | Yes | No | Blocked | No validated hydraulic solver |
+| Heat risk | Yes | Partial | Screening | Needs validated heat-health model |
+| Drought | Contract only | No | No | Requires validated SPI/soil-moisture source |
+| Cyclone | Contract only | No | No | Requires official track/intensity source |
+| Alerts | Yes | Partial | Yes | 12 languages; generation ≠ operational issuance |
+| Provenance | Yes | Yes | Yes | Attached to every observation |
+| Validation | Yes | Partial | Yes | Baseline metrics only |
+
+District aggregation is a genuine spatial operation: IMD 0.25° grid-point
+centres are intersected with geoBoundaries ADM2 polygons using an STRtree, and
+mean/min/max/median/risk are computed only over intersecting cells. A district
+whose polygon contains no grid-point centre reports
+`status: no_grid_coverage` with `null` metrics — never a parent-state or
+neighbouring value. District maxima are cross-checked against state polygons in
+`test_district_climate_service.py` and can never exceed the state maximum.
 
 ## Status and capability reporting
 

@@ -7,7 +7,7 @@ import GodsEyeOperations from "../components/GodsEyeOperations";
 type LayerState = { rainfall: boolean; temperature: boolean; lst: boolean; sst: boolean; anomalies: boolean; risk: boolean; events: boolean };
 type Modal = "notifications" | "account" | "export" | "location" | null;
 
-const NAV = [["▦", "Overview"], ["◈", "Digital Twin"], ["◉", "Observations"], ["◒", "Climate"], ["↗", "Forecast"], ["!", "Risk"], ["⚡", "Extreme Events"], ["⌁", "What-If"], ["◷", "Historical"], ["✓", "Validation"], ["⌘", "Provenance"], ["✦", "Assistant"], ["⚙", "System"]] as const;
+const NAV = [["▦", "Overview"], ["◈", "Digital Twin"], ["◉", "Observations"], ["◒", "Climate"], ["⊞", "Districts"], ["↗", "Forecast"], ["!", "Risk"], ["⚡", "Extreme Events"], ["⌁", "What-If"], ["◷", "Historical"], ["✓", "Validation"], ["⌘", "Provenance"], ["✦", "Assistant"], ["⚙", "System"]] as const;
 const STATE_NAMES: Record<string, string> = { "tamil nadu": "IN-TN", "karnataka": "IN-KA", "kerala": "IN-KL", "maharashtra": "IN-MH", "delhi": "IN-DL", "west bengal": "IN-WB", "andhra pradesh": "IN-AP", "telangana": "IN-TG", "gujarat": "IN-GJ", "rajasthan": "IN-RJ", "odisha": "IN-OR", "uttar pradesh": "IN-UP", "madhya pradesh": "IN-MP", "punjab": "IN-PB", "bihar": "IN-BR", "assam": "IN-AS" };
 
 function Card({ title, children, action }: { title: string; children: ReactNode; action?: ReactNode }) { return <section className="card"><div className="card-head"><span>{title}</span>{action}</div><div className="card-body">{children}</div></section>; }
@@ -28,6 +28,7 @@ export default function ConsolePage() {
   const [horizon, setHorizon] = useState(7);
   const [data, setData] = useState<Record<string, any>>({});
   const [stateData, setStateData] = useState<any>(null);
+  const [districtData, setDistrictData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [modal, setModal] = useState<Modal>(null);
@@ -69,6 +70,17 @@ export default function ConsolePage() {
     return () => { alive = false; };
   }, [apiFetch, selectedId, date]);
 
+  useEffect(() => {
+    let alive = true;
+    if (selectedId === "IN") {
+      Promise.resolve().then(() => { if (alive) setDistrictData(null); });
+    } else {
+      apiFetch("districts", `/api/india/state/${selectedId}/districts/climate/${date}`)
+        .then(([, d]) => { if (alive) setDistrictData(d); });
+    }
+    return () => { alive = false; };
+  }, [apiFetch, selectedId, date]);
+
   const chooseState = useCallback((name: string) => {
     const normalized = name.trim().toLowerCase();
     if (normalized === "india") { setSelectedId("IN"); setSelectedName("INDIA"); setNav("Overview"); return; }
@@ -87,6 +99,7 @@ export default function ConsolePage() {
   let body: ReactNode;
   if (nav === "Overview" || nav === "Digital Twin") body = <div className="dashboard"><div className="metrics"><Metric label="SELECTED ENTITY" value={selectedName}/><Metric label="TWIN STATUS" value={val(twin,["status"], data.health ? "CONNECTED" : null)}/><Metric label="OBSERVATION" value={date}/><Metric label="DATA SOURCE" value="IMD RF25"/></div>{map}<div className="bottom-grid"><Card title="WHAT NOW: CURRENT STATE"><div className="metric-grid"><Metric label="MEAN RAINFALL" value={val(rainfall,["rainfall","mean_mm"], val(metrics,["rainfall_mean_mm"]))} unit="mm"/><Metric label="MAX RAINFALL" value={val(rainfall,["rainfall","maximum_mm"], val(metrics,["rainfall_max_mm"]))} unit="mm"/><Metric label="MEAN HAZARD" value={val(risk,["statistics","mean_hazard_score"], val(metrics,["hazard_mean"]))}/><Metric label="MAX HAZARD" value={val(risk,["statistics","maximum_hazard_score"], val(metrics,["hazard_max"]))}/></div></Card><Card title="RISK DISTRIBUTION"><RiskBars risk={risk}/></Card></div></div>;
   else if (nav === "Observations") body = <div className="two"><Card title="OBSERVATION SOURCES"><Source name="IMD RF25" value={data.rainfall ? "AVAILABLE" : "UNAVAILABLE"}/><Source name="Sentinel / Prithvi-EO" value={data.prithvi ? "SERVICE STATUS AVAILABLE" : "UNAVAILABLE"}/><Source name="Climate variable catalog" value={data.variables ? "AVAILABLE" : "UNAVAILABLE"}/></Card><Card title="PROVENANCE"><Json data={data.provenance}/></Card></div>;
+  else if (nav === "Districts") body = <div className="single"><Card title="DISTRICT CLIMATE AGGREGATION"><DistrictPanel data={districtData} stateName={selectedName}/></Card></div>;
   else if (nav === "Climate") body = <div className="two"><Card title="CLIMATE VARIABLE CATALOG"><Json data={data.variables}/><div className="layer-status"><b>VISUAL LAYER PROVIDERS</b><Json data={climateLayerStatus}/></div></Card><Card title="CURRENT RAINFALL"><Json data={rainfall}/></Card></div>;
   else if (nav === "Forecast") body = <div className="two"><Card title="WHAT NEXT / FORECAST" action={<div className="seg">{[1,3,7,14].map(x => <button className={horizon===x?"sel":""} key={x} onClick={() => setHorizon(x)}>{x}D</button>)}</div>}><ForecastView data={forecast}/></Card><Card title="MODEL CATALOG"><Json data={data.models}/></Card></div>;
   else if (nav === "Risk") body = <div className="risk-page"><div className="metrics"><Metric label="MEAN HAZARD SCORE" value={val(risk,["statistics","mean_hazard_score"])} /><Metric label="MAX HAZARD SCORE" value={val(risk,["statistics","maximum_hazard_score"])} /><Metric label="VALID GRID CELLS" value={val(risk,["grid","valid_points"])} /><Metric label="RISK MODEL" value={val(risk,["risk_model"], "NO DATA")}/></div>{map}<Card title="HAZARD INTELLIGENCE"><RiskBars risk={risk}/></Card></div>;
@@ -107,6 +120,31 @@ function Source({name,value}:{name:string;value:string}){return <div className="
 function Slider({label,value,min,max,step,unit,onChange}:{label:string;value:number;min:number;max:number;step:number;unit:string;onChange:(v:number)=>void}){return <label className="slider"><span>{label}<b>{value}{unit}</b></span><input type="range" min={min} max={max} step={step} value={value} onChange={e=>onChange(Number(e.target.value))}/></label>}
 function ForecastView({data}:{data:any}){if(!data)return <div className="empty">NO DATA / SERVICE UNAVAILABLE</div>;return <div><div className="forecast-meta"><span>MODEL <b>{data.model??data.method??"BASELINE"}</b></span><span>HORIZON <b>{data.horizon??"—"}</b></span></div><Json data={data}/></div>}
 function Historical({data}:{data:any}){if(!data)return <div className="empty">NO DATA / SERVICE UNAVAILABLE</div>;return Array.isArray(data)?<div className="history-list">{data.slice(0,30).map((x:any,i:number)=><div key={i}><span>{x.date??x.TIME??"—"}</span><b>{x.rainfall_mm??x.value??"NO DATA"}</b></div>)}</div>:<Json data={data}/>}
+// Districts come from real IMD grid cells covered by real geoBoundaries polygons.
+// Districts whose polygon contains no grid-point centre are shown as NO GRID
+// COVERAGE rather than with an inferred value.
+function DistrictPanel({data,stateName}:{data:any;stateName:string}){
+  if(!data) return <div className="empty">SELECT A STATE TO SEE DISTRICT-LEVEL AGGREGATION</div>;
+  const rows: any[] = (data.districts ?? []).filter((d:any)=>d.valid_grid_cells);
+  const missing = (data.districts ?? []).length - rows.length;
+  const ranked = [...rows].sort((a,b)=>b.maximum_rainfall_mm-a.maximum_rainfall_mm).slice(0,25);
+  return <div>
+    <div className="metrics"><Metric label="STATE" value={stateName}/><Metric label="DISTRICTS" value={data.count}/><Metric label="WITH DATA" value={data.districts_with_data}/><Metric label="NO GRID COVERAGE" value={missing}/></div>
+    {ranked.length===0
+      ? <div className="empty">NO DISTRICTS WITH IMD GRID COVERAGE FOR THIS DATE</div>
+      : <div className="district-list">
+          <div className="district-head"><span>DISTRICT</span><span>MEAN mm</span><span>MAX mm</span><span>CELLS</span><span>RISK</span></div>
+          {ranked.map((d:any)=><div className="district-row" key={d.district_id}>
+            <span>{d.district_name}</span>
+            <span>{d.mean_rainfall_mm}</span>
+            <span>{d.maximum_rainfall_mm}</span>
+            <span>{d.valid_grid_cells}</span>
+            <span className={`status ${d.risk_category==="low"?"ok":d.risk_category==="moderate"?"warn":"bad"}`}><i/>{String(d.risk_category).toUpperCase()}</span>
+          </div>)}
+        </div>}
+    <p className="notice">{data.aggregation_method ?? "Spatial aggregation over district polygons"} · Source {data.provenance?.source ?? "IMD RF25"} · Geometry geoBoundaries ADM2 (ODbL 1.0). Districts without an intersecting grid-point centre are reported as NO GRID COVERAGE, never estimated.</p>
+  </div>;
+}
 function Hierarchy({data,selected,onSelect}:{data:any;selected:string;onSelect:(id:string)=>void}){return <div className="hierarchy"><button className={selected==="IN"?"node active":"node"} onClick={()=>onSelect("IN")}>🇮🇳 INDIA</button>{data?.states_and_union_territories?.map((s:any)=><button className={selected===s.id?"node active":"node"} key={s.id} onClick={()=>onSelect(s.id)}>{s.name}<small>{s.id}</small></button>)}</div>}
 function SystemPanel({data,refreshing,onRefresh}:{data:any;refreshing:boolean;onRefresh:()=>void}){
   // Prefer the backend's truthful capability contract; never infer CONNECTED
