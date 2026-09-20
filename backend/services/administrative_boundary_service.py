@@ -167,7 +167,8 @@ def get_districts(state_name: str | None = None) -> dict[str, Any]:
             "name": _prop(p, "shapeName", "NAME_2", "district", "DISTRICT") or "Unnamed district",
             "state": p.get("parent_state"),
             "level": "district",
-            "data_status": "geometry_available_climate_metrics_provider_required",
+            "geometry_status": "available",
+            "climate_metrics_endpoint": f"/api/india/district/{_prop(p, 'shapeID', 'shapeISO')}/climate/{{date}}",
         })
     return {
         "status": "available",
@@ -175,7 +176,8 @@ def get_districts(state_name: str | None = None) -> dict[str, Any]:
         "districts": districts,
         "provider": "geoBoundaries",
         "license": "ODbL 1.0",
-        "climate_data_status": "District geometry is available; climate metrics require validated spatial aggregation.",
+        "climate_data_status": "Geometry from geoBoundaries ADM2. District rainfall metrics are served by "
+        "/api/india/district/{district_id}/climate/{date} and /api/india/state/{state_id}/districts/climate/{date}.",
     }
 
 

@@ -19,7 +19,8 @@ class AdministrativeBoundaryTests(unittest.TestCase):
         result = svc.get_districts("Tamil Nadu")
         self.assertEqual(result["count"], 1)
         self.assertEqual(result["districts"][0]["name"], "Test District")
-        self.assertEqual(result["districts"][0]["data_status"], "geometry_available_climate_metrics_provider_required")
+        self.assertEqual(result["districts"][0]["geometry_status"], "available")
+        self.assertIn("/api/india/district/", result["districts"][0]["climate_metrics_endpoint"])
         svc._joined_districts.cache_clear()
 
 
@@ -82,6 +83,56 @@ class ParentStateJoinTests(unittest.TestCase):
 
         self.assertEqual(len(joined), 1)
         self.assertEqual(joined[0]["properties"]["parent_state"], "Lakshadweep")
+
+
+class AdminTwinAdapterTests(unittest.TestCase):
+    """The generic admin adapter must use installed geometry, not invent it."""
+
+    def test_district_level_falls_back_to_geoboundaries_geometry(self):
+        from backend.services import admin_twin_service as admin
+
+        # No india-districts.geojson is installed; the adapter must still find
+        # the validated geoBoundaries ADM2 geometry used by the rest of the app.
+        self.assertTrue(callable(admin.get_district_geojson))
+        with patch.object(admin, "_candidate", return_value=[]), patch.object(
+            admin, "get_district_geojson", return_value={"features": [{"type": "Feature", "properties": {"shapeID": "X"}}]}
+        ):
+            features = admin._features("district")
+        self.assertEqual(len(features), 1)
+
+    def test_unknown_admin_id_returns_no_data_without_metrics(self):
+        from backend.services import admin_twin_service as admin
+        import numpy as np
+
+        with patch.object(admin, "_features", return_value=[]):
+            result = admin.build_admin_twin(
+                "district", "does-not-exist",
+                np.ones((2, 2)), np.array([10.0, 11.0]), np.array([70.0, 71.0]),
+                variable="RAINFALL", unit="mm", date="2024-07-15", source="TEST",
+            )
+        self.assertEqual(result["status"], "no_data")
+        self.assertNotIn("state_variables", result)
+
+    def test_aggregation_over_real_polygon_returns_validated_statistics(self):
+        from backend.services import admin_twin_service as admin
+        import numpy as np
+
+        feature = {
+            "type": "Feature",
+            "geometry": {"type": "Polygon", "coordinates": [[[70, 10], [72, 10], [72, 12], [70, 12], [70, 10]]]},
+            "properties": {"shapeID": "D1"},
+        }
+        latitudes = np.array([9.0, 10.5, 11.5, 13.0])
+        longitudes = np.array([69.0, 71.0, 73.0])
+        values = np.arange(12, dtype=float).reshape(4, 3)
+        with patch.object(admin, "_features", return_value=[feature]):
+            result = admin.build_admin_twin(
+                "district", "D1", values, latitudes, longitudes,
+                variable="RAINFALL", unit="mm", date="2024-07-15", source="TEST",
+            )
+        self.assertEqual(result["status"], "available")
+        self.assertEqual(result["state_variables"]["valid_grid_cells"], 2)
+        self.assertIn("provenance", result)
 
 
 if __name__ == "__main__":

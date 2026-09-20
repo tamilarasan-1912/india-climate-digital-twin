@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 import json
 
+from backend.services.administrative_boundary_service import get_district_geojson
 from backend.services.spatial_aggregation_service import aggregate_grid_to_feature
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -27,6 +28,11 @@ def _features(level: str) -> list[dict[str, Any]]:
             with path.open(encoding="utf-8") as handle:
                 payload = json.load(handle)
             return payload.get("features", [])
+    # Districts already have validated geoBoundaries ADM2 geometry installed in
+    # the administrative boundary cache; reusing it avoids requiring a second
+    # copy of the same dataset under a different filename.
+    if level == "district":
+        return get_district_geojson().get("features", [])
     return []
 
 
