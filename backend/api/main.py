@@ -33,6 +33,10 @@ from backend.api.platform_routes import router as platform_router
 from backend.api.ogc_routes import router as ogc_router
 from backend.services.climate_layer_service import get_climate_layer_catalog, get_layer_status, unavailable_layer
 from backend.services.climate_provider import get_provider_registry, provider_config
+from backend.services.climate_provider_runtime import get_provider_layer
+from backend.services.climate_intelligence_service import answer_question
+from backend.services.observability import configure_logging, new_request_id, request_id_var
+from backend.services.rate_limiter import enforce_rate_limit
 from backend.services.gods_eye_service import build_gods_eye_state, get_gods_eye_layer
 from backend.services.administrative_boundary_service import get_admin_metadata, get_districts, get_district_geojson
 from backend.services.climate_raster_service import raster_contract, tile_xyz_bounds, render_rainfall_xyz_tile
@@ -41,13 +45,27 @@ from backend.services.gods_eye_operations_service import (
     build_gods_eye_timeline, build_gods_eye_events, build_gods_eye_operations,
 )
 
-app = FastAPI(title="India Climate Digital Twin API", description="Operational scientific API for the India Climate Digital Twin.", version="1.5.0")
+app = FastAPI(title="India Climate Digital Twin API", description="Operational scientific API for the India Climate Digital Twin.", version="1.6.0")
+configure_logging()
 _cors_origins = [origin.strip() for origin in os.getenv("CORS_ALLOWED_ORIGINS", "").split(",") if origin.strip()]
 if not _cors_origins:
     _cors_origins = ["http://localhost:3000"]
 app.add_middleware(CORSMiddleware, allow_origins=_cors_origins, allow_credentials=True, allow_methods=["GET", "POST", "OPTIONS"], allow_headers=["Content-Type", "Authorization"])
 app.include_router(platform_router)
 app.include_router(ogc_router)
+
+@app.middleware("http")
+async def request_observability(request, call_next):
+    enforce_rate_limit(request)
+    token = request_id_var.set(request.headers.get("x-request-id") or new_request_id())
+    try:
+        response = await call_next(request)
+        response.headers["x-request-id"] = request_id_var.get()
+        response.headers["x-content-type-options"] = "nosniff"
+        response.headers["x-frame-options"] = "DENY"
+        return response
+    finally:
+        request_id_var.reset(token)
 
 
 def _call(function, *args, **kwargs):
@@ -134,13 +152,17 @@ def gods_eye_operations(date: str):
     return _call(build_gods_eye_operations, date)
 
 @app.get("/api/climate/temperature/{date}")
-def climate_temperature(date: str): return unavailable_layer("temperature", date)
+def climate_temperature(date: str): return _call(get_provider_layer, "temperature", date)
+
+@app.get("/api/climate/intelligence")
+def climate_intelligence(question: str = Query(..., min_length=1), date: str = Query(..., min_length=10), layer: str = Query(default="rainfall")):
+    return _call(answer_question, question, date, layer)
 @app.get("/api/climate/lst/{date}")
-def climate_lst(date: str): return unavailable_layer("lst", date)
+def climate_lst(date: str): return _call(get_provider_layer, "lst", date)
 @app.get("/api/climate/sst/{date}")
-def climate_sst(date: str): return unavailable_layer("sst", date)
+def climate_sst(date: str): return _call(get_provider_layer, "sst", date)
 @app.get("/api/climate/anomalies/{date}")
-def climate_anomalies(date: str): return unavailable_layer("anomalies", date)
+def climate_anomalies(date: str): return _call(get_provider_layer, "anomalies", date)
 
 # -------------------- DIGITAL TWIN CONTRACT --------------------
 @app.get("/api/twin/contract")

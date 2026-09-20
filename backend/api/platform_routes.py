@@ -4,7 +4,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends, Request
 
 from backend.models.domain_models import Asset, Exposure
 from backend.services.alert_service import build_alert, get_language_catalog
@@ -16,6 +16,8 @@ from backend.services.heat_risk_engine import assess_heat_risk
 from backend.services.risk_contract import get_risk_contract
 from backend.services.risk_engine import assess_asset
 from backend.services.scenario_engine import build_scenario
+from backend.services.auth_service import require_operator
+from backend.services.multilingual_alert_service import render_alert
 
 router = APIRouter(prefix="/api/v1", tags=["industry-platform"])
 
@@ -60,7 +62,8 @@ def alert_preview(hazard: str, severity: str, region: str, condition: str, actio
 
 
 @router.post("/assets")
-def create_or_update_asset(asset: Asset) -> dict[str, Any]:
+def create_or_update_asset(asset: Asset, request: Request) -> dict[str, Any]:
+    require_operator(request)
     return upsert_asset(asset)
 
 
