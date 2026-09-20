@@ -171,3 +171,75 @@ class RemainingCapabilitiesTest(unittest.TestCase):
                 os.environ.pop("CLIMATE_PROVIDER_ANOMALIES_URL", None)
             else:
                 os.environ["CLIMATE_PROVIDER_ANOMALIES_URL"] = old
+
+
+class DistrictAssistantTest(unittest.TestCase):
+    """Districts must be answerable from real aggregated observations."""
+
+    DATE = "2024-07-15"
+
+    def test_district_question_returns_real_aggregation(self):
+        from backend.services.climate_intelligence_service import answer_question
+
+        answer = answer_question("What was rainfall in Coimbatore district on this date?", self.DATE)
+        self.assertEqual(answer["status"], "AVAILABLE")
+        self.assertTrue(answer["data_available"])
+        self.assertEqual(answer["district_name"], "Coimbatore")
+        self.assertEqual(answer["state"], "Tamil Nadu")
+        self.assertGreater(answer["metrics"]["valid_grid_cells"], 0)
+        # The district maximum must be a real grid value, not an estimate.
+        self.assertGreaterEqual(
+            answer["metrics"]["maximum_rainfall_mm"], answer["metrics"]["mean_rainfall_mm"]
+        )
+
+    def test_district_question_is_backed_by_imd(self):
+        from backend.services.climate_intelligence_service import answer_question
+
+        answer = answer_question("rainfall in North Goa", self.DATE)
+        self.assertEqual(answer["status"], "AVAILABLE")
+        self.assertEqual(answer["source"], "IMD")
+        self.assertIn("provenance", answer)
+
+    def test_uncovered_district_reports_no_data_not_a_value(self):
+        from backend.services.climate_intelligence_service import answer_question
+        from backend.services.district_climate_service import (
+            _normalised_districts,
+            get_district_climate_metrics,
+        )
+
+        # Find a district that genuinely has no IMD grid-point centre.
+        uncovered = None
+        for district_id, _name, _state, _geom in _normalised_districts():
+            metrics = get_district_climate_metrics(self.DATE, district_id)
+            if metrics["status"] != "available":
+                uncovered = metrics["district_name"]
+                break
+        self.assertIsNotNone(uncovered, "expected at least one district without grid coverage")
+
+        answer = answer_question(f"rainfall in {uncovered} district", self.DATE)
+        self.assertEqual(answer["status"], "NO_DATA")
+        self.assertFalse(answer["data_available"])
+        self.assertNotIn("metrics", answer)
+
+    def test_word_boundary_matching_avoids_false_district_hits(self):
+        from backend.services.climate_intelligence_service import _district_mentioned
+
+        # "Una" is a real district name; "unavailable" must not match it.
+        self.assertIsNone(_district_mentioned("Why is temperature unavailable?"))
+        self.assertIsNone(_district_mentioned("What is the current climate state?"))
+
+    def test_longest_district_name_wins(self):
+        from backend.services.climate_intelligence_service import _district_mentioned
+        from backend.services.district_climate_service import get_district_climate_metrics
+
+        match = _district_mentioned("rainfall in North Goa district")
+        self.assertIsNotNone(match)
+        self.assertEqual(
+            get_district_climate_metrics(self.DATE, match)["district_name"], "North Goa"
+        )
+
+    def test_assistant_capabilities_include_districts(self):
+        from backend.services.climate_intelligence_service import get_intelligence_capabilities
+
+        intents = get_intelligence_capabilities()["supported_intents"]
+        self.assertIn("district-level rainfall aggregation", intents)

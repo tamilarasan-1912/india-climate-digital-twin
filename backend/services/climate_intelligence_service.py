@@ -9,6 +9,8 @@ but the numeric content of an answer always originates here.
 """
 from __future__ import annotations
 
+import re
+
 from typing import Any
 
 from backend.services.climate_layer_service import CLIMATE_LAYERS, get_layer_status
@@ -279,6 +281,71 @@ def _summarise_layer(layer: str, date: str, question: str) -> dict[str, Any]:
     }
 
 
+def _summarise_district(date: str, question: str, district_id: str) -> dict[str, Any]:
+    from backend.services.district_climate_service import get_district_climate_metrics
+
+    result = get_district_climate_metrics(date, district_id)
+    name = result["district_name"]
+    if result["status"] != "available":
+        reason = result["data_coverage"].get("unavailable_reason") or "no_grid_coverage"
+        return {
+            "answer": (
+                f"No validated rainfall aggregation is available for {name} on {date} ({reason})."
+            ),
+            "status": "NO_DATA",
+            "data_available": False,
+            "question": question,
+            "layer": "rainfall",
+            "date": date,
+            "district_id": district_id,
+            "source": "IMD",
+            "data_coverage": result["data_coverage"],
+        }
+    metrics = result["metrics"]
+    return {
+        "answer": (
+            f"{name}, {result['state']} rainfall on {date}: mean {metrics['mean_rainfall_mm']} mm, "
+            f"maximum {metrics['maximum_rainfall_mm']} mm over {metrics['valid_grid_cells']} IMD grid cells "
+            f"({metrics['risk_category']} rainfall hazard)."
+        ),
+        "status": "AVAILABLE",
+        "data_available": True,
+        "question": question,
+        "layer": "rainfall",
+        "date": date,
+        "district_id": district_id,
+        "district_name": name,
+        "state": result["state"],
+        "metrics": metrics,
+        "data_coverage": result["data_coverage"],
+        "source": "IMD",
+        "provenance": result["provenance"],
+    }
+
+
+def _district_mentioned(question: str) -> str | None:
+    """Resolve a district name in the question to a district identifier.
+
+    Matching uses word boundaries: a substring test would match the district
+    "Una" inside the word "unavailable".
+    """
+    from backend.services.district_climate_service import _normalised_districts, normalise_admin_name
+
+    target = normalise_admin_name(question)
+    if not target:
+        return None
+    matches = []
+    for item in _normalised_districts():
+        name = normalise_admin_name(item[1])
+        if name and re.search(rf"\b{re.escape(name)}\b", target):
+            matches.append((name, item))
+    if not matches:
+        return None
+    # Prefer the longest name so "North Goa" wins over "Goa".
+    matches.sort(key=lambda pair: len(pair[0]), reverse=True)
+    return matches[0][1][0]
+
+
 def _states_mentioned(question: str) -> list[str]:
     from backend.services.india_hierarchy_service import STATES_AND_UTS
 
@@ -344,6 +411,11 @@ def answer_question(question: str, date: str, layer: str = "rainfall") -> dict[s
     requested = _variable_mentioned(q)
     if requested and requested != key:
         return _summarise_layer(requested, date, question)
+    # District questions take precedence over state questions: a district name
+    # usually contains its state's name (e.g. "Coimbatore, Tamil Nadu").
+    district_id = _district_mentioned(question)
+    if district_id and ("district" in q or district_id):
+        return _summarise_district(date, question, district_id)
     for state_id in _states_mentioned(q):
         return _summarise_state(date, question, state_id)
     if key == "rainfall" and "risk" in q:
@@ -368,6 +440,7 @@ def get_intelligence_capabilities() -> dict[str, Any]:
         "supported_intents": [
             "national rainfall observation",
             "state-level rainfall aggregation",
+            "district-level rainfall aggregation",
             "rainfall-hazard risk summary",
             "extreme rainfall events",
             "provider-backed temperature/LST/SST/anomaly lookup",
