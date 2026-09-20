@@ -1,0 +1,126 @@
+{
+  "schema_version": "1.0",
+  "scope": "INDIA",
+  "policy": {
+    "authoritative_only": true,
+    "fabrication_allowed": false,
+    "missing_data_statuses": [
+      "NO_DATA",
+      "NOT_CONNECTED",
+      "WAITING_FOR_CREDENTIALS",
+      "MODEL_NOT_READY",
+      "COMPUTE_NOT_AVAILABLE"
+    ]
+  },
+  "sources": [
+    {
+      "id": "imd-rf25",
+      "provider": "India Meteorological Department",
+      "name": "0.25 degree gridded rainfall",
+      "type": "observation",
+      "variables": ["rainfall"],
+      "url": "https://imdpune.gov.in/cmpg/Griddata/Rainfall_25_NetCDF.html",
+      "format": "NetCDF",
+      "status": "CONNECTED_WHEN_DATASET_PRESENT"
+    },
+    {
+      "id": "imd-api",
+      "provider": "India Meteorological Department",
+      "name": "Public weather API",
+      "type": "operational-api",
+      "variables": ["rainfall", "temperature", "weather", "warnings"],
+      "url": "https://api.imd.gov.in/public/api_reference.html",
+      "status": "ADAPTER_REQUIRED"
+    },
+    {
+      "id": "mosdac-gsmap",
+      "provider": "ISRO MOSDAC",
+      "name": "GSMaP-ISRO rainfall",
+      "type": "satellite",
+      "variables": ["rainfall"],
+      "url": "https://mosdac.gov.in/gsmap-isro-rain",
+      "status": "ADAPTER_REQUIRED"
+    },
+    {
+      "id": "mosdac-insat3d",
+      "provider": "ISRO MOSDAC",
+      "name": "INSAT-3D products",
+      "type": "satellite",
+      "variables": ["rainfall", "temperature", "humidity", "radiation", "cloud", "fire"],
+      "url": "https://mosdac.gov.in/insat-3d-data-products",
+      "status": "ADAPTER_REQUIRED"
+    },
+    {
+      "id": "era5",
+      "provider": "Copernicus Climate Change Service / ECMWF",
+      "name": "ERA5 single levels",
+      "type": "reanalysis",
+      "variables": ["temperature", "humidity", "wind", "pressure", "radiation", "soil_moisture"],
+      "url": "https://cds.climate.copernicus.eu/datasets/reanalysis-era5-single-levels",
+      "status": "ADAPTER_REQUIRED"
+    },
+    {
+      "id": "nasa-merra2",
+      "provider": "NASA Earthdata / GES DISC",
+      "name": "MERRA-2",
+      "type": "reanalysis",
+      "variables": ["atmospheric_state"],
+      "url": "https://disc.gsfc.nasa.gov/datasets?project=MERRA-2",
+      "status": "ADAPTER_REQUIRED"
+    },
+    {
+      "id": "prithvi-wxc",
+      "provider": "NASA IMPACT / IBM",
+      "name": "Prithvi-WxC-1.0-2300M-rollout",
+      "type": "forecast-model",
+      "variables": ["atmospheric_forecast"],
+      "url": "https://huggingface.co/ibm-nasa-geospatial/Prithvi-WxC-1.0-2300M",
+      "status": "GATED_BY_OFFICIAL_INPUT_CONTRACT"
+    },
+    {
+      "id": "prithvi-eo",
+      "provider": "NASA IMPACT / IBM",
+      "name": "Prithvi-EO-2.0-300M",
+      "type": "earth-observation-model",
+      "variables": ["eo_features"],
+      "url": "https://huggingface.co/ibm-nasa-geospatial/Prithvi-EO-2.0-300M",
+      "status": "MODEL_ADAPTER"
+    },
+    {
+      "id": "incois",
+      "provider": "INCOIS",
+      "name": "Ocean observations and forecasts",
+      "type": "ocean",
+      "variables": ["sst", "sea_level", "currents", "waves", "ocean_forecast"],
+      "url": "https://incois.gov.in/site/dataholdings.jsp",
+      "status": "ADAPTER_REQUIRED"
+    },
+    {
+      "id": "cwc",
+      "provider": "Central Water Commission",
+      "name": "River and flood intelligence",
+      "type": "hydrology",
+      "variables": ["river_state", "flood"],
+      "url": "https://cwc.gov.in/",
+      "status": "ADAPTER_REQUIRED"
+    },
+    {
+      "id": "iitm-cordex-south-asia",
+      "provider": "Indian Institute of Tropical Meteorology / CORDEX",
+      "name": "South Asia climate projections",
+      "type": "climate-projection",
+      "variables": ["climate_projection"],
+      "url": "https://www.cordex.org/",
+      "status": "ADAPTER_REQUIRED"
+    },
+    {
+      "id": "sentinel-2",
+      "provider": "Copernicus / ESA",
+      "name": "Sentinel-2 multispectral imagery",
+      "type": "earth-observation",
+      "variables": ["vegetation", "eo_features", "land_surface"],
+      "url": "https://dataspace.copernicus.eu/",
+      "status": "PIPELINE_PRESENT_FOR_SUPPORTED_ARCHIVE"
+    }
+  ]
+}

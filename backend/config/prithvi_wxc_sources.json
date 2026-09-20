@@ -1,0 +1,20 @@
+{
+  "model": "ibm-nasa-geospatial/Prithvi-WxC-1.0-2300M-rollout",
+  "official_model_config": "https://huggingface.co/ibm-nasa-geospatial/Prithvi-WxC-1.0-2300M-rollout/blob/main/config.yaml",
+  "official_model_card": "https://huggingface.co/ibm-nasa-geospatial/Prithvi-WxC-1.0-2300M-rollout",
+  "official_reference_code": "https://github.com/NASA-IMPACT/Prithvi-WxC",
+  "base_model_config": "https://huggingface.co/ibm-nasa-geospatial/Prithvi-WxC-1.0-2300M/blob/main/config.yaml",
+  "climatology_root": "https://huggingface.co/ibm-nasa-geospatial/Prithvi-WxC-1.0-2300M/tree/main/climatology",
+  "climatology_files": {
+    "surface": "climate_surface_doyDDD_hourHH.nc",
+    "vertical": "climate_vertical_doyDDD_hourHH.nc",
+    "surface_anomaly_variance": "anomaly_variance_surface.nc",
+    "vertical_anomaly_variance": "anomaly_variance_vertical.nc"
+  },
+  "policy": {
+    "use_official_statistics_only": true,
+    "do_not_create_synthetic_normalization": true,
+    "do_not_commit_checkpoint": true,
+    "do_not_download_full_climatology_into_codespace_by_default": true
+  }
+}

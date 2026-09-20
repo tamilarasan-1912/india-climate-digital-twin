@@ -35,6 +35,10 @@ from backend.services.risk_contract import get_risk_contract
 from backend.api.forecast_state_routes import generate_prithvi_forecast
 from backend.api.platform_routes import router as platform_router
 from backend.api.ogc_routes import router as ogc_router
+from backend.api.data_routes import router as data_router
+from backend.api.governance_routes import router as governance_router
+from backend.api.prithvi_routes import router as prithvi_router
+from backend.api.verified_data_routes import router as verified_data_router
 from backend.services.climate_layer_service import get_climate_layer_catalog, get_layer_status, unavailable_layer
 from backend.services.climate_provider import get_provider_registry, provider_config
 from backend.services.climate_provider_runtime import get_provider_layer
@@ -59,6 +63,10 @@ if not _cors_origins:
 app.add_middleware(CORSMiddleware, allow_origins=_cors_origins, allow_credentials=True, allow_methods=["GET", "POST", "OPTIONS"], allow_headers=["Content-Type", "Authorization"])
 app.include_router(platform_router)
 app.include_router(ogc_router)
+app.include_router(data_router)
+app.include_router(verified_data_router)
+app.include_router(governance_router)
+app.include_router(prithvi_router)
 
 @app.middleware("http")
 async def request_observability(request, call_next):
