@@ -6,6 +6,7 @@ No synthetic values are generated.
 """
 from __future__ import annotations
 import json, os
+from datetime import datetime, timezone
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError, URLError
 from typing import Any
@@ -53,12 +54,23 @@ def get_provider_layer(layer: str, date: str) -> dict[str, Any]:
     data_available = bool(payload.get("data_available", "features" in payload or "data" in payload))
     payload.setdefault("layer", key)
     payload.setdefault("date", date)
-    payload.setdefault("provider", os.getenv(f"{env}_NAME", "configured-provider"))
-    payload.setdefault("provenance", {
-        "provider_url": url,
-        "retrieved_at": None,
-        "validation": "transport+schema",
-    })
+    provenance = payload.get("provenance")
+    if not isinstance(provenance, dict):
+        provenance = {}
+    # Prefer the provider's own declared identity over a generic placeholder so
+    # provenance keeps naming the real source, not this platform's config.
+    declared_provider = (
+        payload.get("provider")
+        or provenance.get("provider")
+        or os.getenv(f"{env}_NAME")
+        or "configured-provider"
+    )
+    payload["provider"] = declared_provider
+    provenance.setdefault("provider", declared_provider)
+    provenance.setdefault("provider_url", url)
+    provenance.setdefault("retrieved_at", datetime.now(timezone.utc).isoformat())
+    provenance.setdefault("validation", "transport+schema")
+    payload["provenance"] = provenance
     payload["data_available"] = data_available
     payload["status"] = status if data_available else "NO_DATA"
     return payload

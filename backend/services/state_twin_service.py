@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import re
+import unicodedata
 from pathlib import Path
 from typing import Any
 
@@ -19,7 +20,7 @@ from shapely.geometry import Point, shape
 from backend.services.climate_risk_service import (
     calculate_risk_score,
     classify_risk_score,
-    load_dataset,
+    read_dataset,
 )
 from backend.services.india_hierarchy_service import STATES_AND_UTS
 
@@ -44,37 +45,57 @@ STATE_ALIASES = {
 }
 
 PROPERTY_KEYS = (
-    "id", "ID", "state_id", "STATE_ID", "st_nm", "ST_NM", "state", "STATE",
-    "name", "NAME", "NAME_1", "State_Name", "STATE_NAME", "shapeName",
+    "id", "ID", "state_id", "STATE_ID", "shapeISO", "ISO", "st_nm", "ST_NM",
+    "state", "STATE", "name", "NAME", "NAME_1", "State_Name", "STATE_NAME",
+    "shapeName",
 )
 
 _BOUNDARY_CACHE: dict[str, tuple[str, Any]] | None = None
+_MISSING_BOUNDARY_IDS: tuple[str, ...] = ()
 _MASK_CACHE: dict[str, tuple[np.ndarray, np.ndarray]] = {}
+_STATE_IDS = frozenset(item["id"] for item in STATES_AND_UTS)
 
 
 def _normalise_name(value: Any) -> str:
-    text = re.sub(r"[^A-Z0-9]+", " ", str(value).upper()).strip()
+    # geoBoundaries ADM1 names carry diacritics (e.g. "Tamil Nādu"), so fold to
+    # ASCII before matching against the hierarchy's plain-ASCII names.
+    decomposed = unicodedata.normalize("NFKD", str(value))
+    ascii_text = "".join(ch for ch in decomposed if not unicodedata.combining(ch))
+    text = re.sub(r"[^A-Z0-9]+", " ", ascii_text.upper()).strip()
     return re.sub(r"\s+", " ", text)
+
+
+def _match_state_id(value: Any) -> str | None:
+    raw = str(value).strip().upper()
+    if raw in _STATE_IDS:
+        return raw
+    normalised = _normalise_name(value)
+    if not normalised:
+        return None
+    if normalised in _STATE_ALIAS_IDS:
+        return _STATE_ALIAS_IDS[normalised]
+    for item in STATES_AND_UTS:
+        if normalised == _NORMALISED_STATE_NAMES[item["id"]]:
+            return item["id"]
+    return None
 
 
 def _state_id_from_properties(properties: dict[str, Any]) -> str | None:
     for key in PROPERTY_KEYS:
         if key not in properties or properties[key] in (None, ""):
             continue
-        value = str(properties[key]).strip().upper()
-        if value in {item["id"] for item in STATES_AND_UTS}:
-            return value
-        normalised = _normalise_name(value)
-        if normalised in STATE_ALIASES:
-            return STATE_ALIASES[normalised]
-        for item in STATES_AND_UTS:
-            if normalised == _normalise_name(item["name"]):
-                return item["id"]
+        state_id = _match_state_id(properties[key])
+        if state_id:
+            return state_id
     return None
 
 
+_NORMALISED_STATE_NAMES = {item["id"]: _normalise_name(item["name"]) for item in STATES_AND_UTS}
+_STATE_ALIAS_IDS = {_normalise_name(key): value for key, value in STATE_ALIASES.items()}
+
+
 def _load_boundaries() -> dict[str, tuple[str, Any]]:
-    global _BOUNDARY_CACHE
+    global _BOUNDARY_CACHE, _MISSING_BOUNDARY_IDS
     if _BOUNDARY_CACHE is not None:
         return _BOUNDARY_CACHE
     if not BOUNDARY_FILE.exists():
@@ -90,11 +111,23 @@ def _load_boundaries() -> dict[str, tuple[str, Any]]:
         geometry = feature.get("geometry")
         if state_id and geometry:
             result[state_id] = (next(item["name"] for item in STATES_AND_UTS if item["id"] == state_id), shape(geometry))
-    missing = [item["id"] for item in STATES_AND_UTS if item["id"] not in result]
-    if missing:
-        raise RuntimeError(f"State boundary dataset is missing administrative geometries: {', '.join(missing)}")
+    # A boundary file that covers only part of India is degraded, not fatal:
+    # states without geometry keep an explicit unavailable status downstream.
+    _MISSING_BOUNDARY_IDS = tuple(item["id"] for item in STATES_AND_UTS if item["id"] not in result)
     _BOUNDARY_CACHE = result
     return result
+
+
+def get_boundary_coverage() -> dict[str, Any]:
+    """Report which administrative geometries are actually usable."""
+    available = _load_boundaries()
+    return {
+        "boundary_file": str(BOUNDARY_FILE.relative_to(ROOT)),
+        "states_with_geometry": len(available),
+        "states_missing_geometry": list(_MISSING_BOUNDARY_IDS),
+        "complete": not _MISSING_BOUNDARY_IDS,
+        "note": "States without geometry report no_data rather than a bounding-box or national substitute.",
+    }
 
 
 def _dataset_coordinates(dataset: xr.Dataset) -> tuple[np.ndarray, np.ndarray]:
@@ -117,8 +150,8 @@ def _grid_mask(state_id: str, latitudes: np.ndarray, longitudes: np.ndarray) -> 
             if geometry.covers(Point(float(longitude), float(latitude))):
                 lat_idx.append(i)
                 lon_idx.append(j)
-    if not lat_idx:
-        raise RuntimeError(f"No IMD grid cells intersect state geometry for {state_id}")
+    # Small territories (e.g. island groups) can contain no 0.25-degree grid
+    # centre at all; that is an honest no-coverage result, not a failure.
     result = np.asarray(lat_idx, dtype=int), np.asarray(lon_idx, dtype=int)
     _MASK_CACHE[cache_key] = result
     return result
@@ -135,7 +168,7 @@ def _values_for_state(selected: xr.DataArray, state_id: str, latitudes: np.ndarr
 def _stats(values: np.ndarray) -> dict[str, Any]:
     valid = values[np.isfinite(values)]
     if valid.size == 0:
-        return {"valid_grid_cells": 0, "mean_rainfall_mm": None, "median_rainfall_mm": None, "maximum_rainfall_mm": None, "mean_hazard_score": None, "risk_category": "no_data"}
+        return {"valid_grid_cells": 0, "status": "no_grid_coverage", "mean_rainfall_mm": None, "median_rainfall_mm": None, "maximum_rainfall_mm": None, "mean_hazard_score": None, "maximum_hazard_score": None, "risk_category": "no_data"}
     scores = np.asarray([calculate_risk_score(float(value)) for value in valid], dtype=float)
     mean_score = float(np.mean(scores))
     return {
@@ -149,52 +182,89 @@ def _stats(values: np.ndarray) -> dict[str, Any]:
     }
 
 
+def _unavailable_state(status: str) -> dict[str, Any]:
+    return {
+        "valid_grid_cells": 0,
+        "mean_rainfall_mm": None,
+        "median_rainfall_mm": None,
+        "maximum_rainfall_mm": None,
+        "mean_hazard_score": None,
+        "maximum_hazard_score": None,
+        "risk_category": "no_data",
+        "status": status,
+    }
+
+
+def _state_metrics(selected: xr.DataArray, state_id: str, latitudes: np.ndarray, longitudes: np.ndarray) -> dict[str, Any]:
+    if state_id not in _load_boundaries():
+        return _unavailable_state("boundary_unavailable")
+    return _stats(_values_for_state(selected, state_id, latitudes, longitudes))
+
+
 def get_state_climate_metrics(date: str, state_id: str) -> dict[str, Any]:
     normalized = state_id.strip().upper()
-    if normalized not in {item["id"] for item in STATES_AND_UTS}:
+    if normalized not in _STATE_IDS:
         raise ValueError(f"Unknown India state or union territory: {state_id}")
-    dataset = load_dataset()
-    try:
+    state_name = next(item["name"] for item in STATES_AND_UTS if item["id"] == normalized)
+    with read_dataset() as dataset:
         time_name = "TIME" if "TIME" in dataset.coords else "time"
         try:
             selected = dataset["RAINFALL"].sel({time_name: date})
         except Exception as error:
             raise ValueError(f"Invalid or unavailable date '{date}'") from error
         latitudes, longitudes = _dataset_coordinates(dataset)
-        current = _stats(_values_for_state(selected, normalized, latitudes, longitudes))
+        current = _state_metrics(selected, normalized, latitudes, longitudes)
+        boundary_available = normalized in _load_boundaries()
         return {
             "status": "available" if current["valid_grid_cells"] else "no_data",
             "scope": "India",
             "level": "state",
             "state_id": normalized,
-            "state_name": next(item["name"] for item in STATES_AND_UTS if item["id"] == normalized),
+            "state_name": state_name,
             "observation_date": date,
             "variable": "RAINFALL",
             "units": "mm",
             "metrics": current,
-            "data_coverage": {"valid_grid_cells": current["valid_grid_cells"], "selection_method": "IMD 0.25-degree grid cells whose centers are covered by the state polygon"},
+            "data_coverage": {
+                "valid_grid_cells": current["valid_grid_cells"],
+                "boundary_available": boundary_available,
+                "selection_method": "IMD 0.25-degree grid cells whose centers are covered by the state polygon",
+                "unavailable_reason": None if boundary_available else "state boundary geometry is not present in the boundary dataset",
+            },
             "provenance": {"source": "IMD RF25", "dataset": "RF25_ind2024_rfp25.nc", "aggregation": "spatial mean/median/max over intersecting grid cells"},
         }
-    finally:
-        dataset.close()
+
 
 
 def get_all_state_climate_metrics(date: str) -> dict[str, Any]:
-    dataset = load_dataset()
-    try:
+    with read_dataset() as dataset:
         time_name = "TIME" if "TIME" in dataset.coords else "time"
         try:
             selected = dataset["RAINFALL"].sel({time_name: date})
         except Exception as error:
             raise ValueError(f"Invalid or unavailable date '{date}'") from error
         latitudes, longitudes = _dataset_coordinates(dataset)
+        boundaries = _load_boundaries()
         states = []
         for item in STATES_AND_UTS:
-            metrics = _stats(_values_for_state(selected, item["id"], latitudes, longitudes))
+            metrics = _state_metrics(selected, item["id"], latitudes, longitudes)
             states.append({"state_id": item["id"], "state_name": item["name"], **metrics})
-        return {"status": "available", "scope": "India", "level": "state", "observation_date": date, "variable": "RAINFALL", "units": "mm", "count": len(states), "states": states, "aggregation": "IMD 0.25-degree grid cells covered by each state polygon", "source": "IMD RF25"}
-    finally:
-        dataset.close()
+        available = sum(1 for item in states if item["valid_grid_cells"])
+        return {
+            "status": "available" if available else "no_data",
+            "scope": "India",
+            "level": "state",
+            "observation_date": date,
+            "variable": "RAINFALL",
+            "units": "mm",
+            "count": len(states),
+            "states_with_data": available,
+            "boundary_coverage": {"states_with_geometry": len(boundaries), "states_missing_geometry": list(_MISSING_BOUNDARY_IDS)},
+            "states": states,
+            "aggregation": "IMD 0.25-degree grid cells covered by each state polygon",
+            "source": "IMD RF25",
+        }
+
 
 
 def get_state_twin(date: str, state_id: str) -> dict[str, Any]:

@@ -33,8 +33,8 @@ export default function GodsEyeOperations({ date, onDateChange }: Props) {
     return () => { alive = false; };
   }, [date]);
 
-  const history: TimelinePoint[] = timeline?.history?.series ?? [];
-  const forecast: TimelinePoint[] = timeline?.forecast?.forecast ?? [];
+  const history = useMemo<TimelinePoint[]>(() => timeline?.history?.series ?? [], [timeline]);
+  const forecast = useMemo<TimelinePoint[]>(() => timeline?.forecast?.forecast ?? [], [timeline]);
   const points = useMemo(() => mode === "FORECAST" ? forecast : history, [forecast, history, mode]);
 
   useEffect(() => {

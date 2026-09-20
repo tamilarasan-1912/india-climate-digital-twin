@@ -37,7 +37,7 @@ def assess_heat_risk(
     *,
     temperature_c: float,
     relative_humidity_pct: float,
-    exposure_index: float | None,
+    exposure_index: float | None = None,
     confidence: float | None = None,
     model_version: str = "heat-screening-1.0.0",
 ) -> dict[str, Any]:

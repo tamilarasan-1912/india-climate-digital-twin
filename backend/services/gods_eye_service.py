@@ -8,7 +8,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from backend.services.climate_layer_service import get_climate_layer_catalog, get_layer_status, unavailable_layer
+from backend.services.climate_layer_service import get_climate_layer_catalog
+from backend.services.climate_provider_runtime import get_provider_layer
 from backend.services.rainfall_service import get_india_daily_summary, get_rainfall_grid
 from backend.services.extreme_event_service import get_extreme_event_summary, get_extreme_rainfall_geojson
 from backend.services.climate_risk_service import get_climate_risk_summary, get_climate_risk_grid
@@ -65,5 +66,8 @@ def get_gods_eye_layer(layer: str, date: str) -> dict[str, Any]:
     if key == "events":
         return get_extreme_rainfall_geojson(date)
     if key in {"temperature", "lst", "sst", "anomalies"}:
-        return unavailable_layer(key, date)
+        # Route through the validated provider runtime so a configured (and
+        # responding) adapter can supply the layer. When nothing is connected
+        # the runtime returns an explicit NO_DATA payload.
+        return get_provider_layer(key, date)
     raise ValueError(f"Unknown God's-Eye climate layer: {layer}")

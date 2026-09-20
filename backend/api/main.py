@@ -1,8 +1,11 @@
 from __future__ import annotations
 
-from fastapi import FastAPI, HTTPException, Query, Response
+from fastapi import FastAPI, HTTPException, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+import logging
 import os
+import time
 from datetime import datetime, timezone
 
 from backend.config.climate_config import CLIMATE_VARIABLES
@@ -19,9 +22,10 @@ from backend.services.digital_twin_service import (
     get_model_catalog, get_validation_summary, explain_rainfall_risk,
     get_provenance, get_system_health,
 )
+from backend.services.model_registry import get_model_registry
 from backend.services.twin_engine import build_twin_snapshot, build_what_next, build_what_if, get_twin_health
 from backend.services.india_hierarchy_service import get_india_hierarchy, resolve_location
-from backend.services.state_twin_service import get_all_state_climate_metrics, get_state_climate_metrics, get_state_twin
+from backend.services.state_twin_service import get_all_state_climate_metrics, get_state_climate_metrics, get_state_twin, get_boundary_coverage
 from backend.services.prithvi_wxc_service import get_prithvi_wxc_status, validate_prithvi_inputs, run_local_inference
 from backend.services.climate_state_contract import get_climate_state_contract
 from backend.services.multi_variable_twin_service import get_active_variable_catalog
@@ -34,8 +38,9 @@ from backend.api.ogc_routes import router as ogc_router
 from backend.services.climate_layer_service import get_climate_layer_catalog, get_layer_status, unavailable_layer
 from backend.services.climate_provider import get_provider_registry, provider_config
 from backend.services.climate_provider_runtime import get_provider_layer
-from backend.services.climate_intelligence_service import answer_question
-from backend.services.observability import configure_logging, new_request_id, request_id_var
+from backend.services.climate_intelligence_service import answer_question, get_intelligence_capabilities
+from backend.services.observability import configure_logging, new_request_id, request_id_var, log_request
+from backend.services.auth_service import require_operator
 from backend.services.rate_limiter import enforce_rate_limit
 from backend.services.gods_eye_service import build_gods_eye_state, get_gods_eye_layer
 from backend.services.administrative_boundary_service import get_admin_metadata, get_districts, get_district_geojson
@@ -45,7 +50,8 @@ from backend.services.gods_eye_operations_service import (
     build_gods_eye_timeline, build_gods_eye_events, build_gods_eye_operations,
 )
 
-app = FastAPI(title="India Climate Digital Twin API", description="Operational scientific API for the India Climate Digital Twin.", version="1.6.0")
+app = FastAPI(title="India Climate Digital Twin API", description="Operational scientific API for the India Climate Digital Twin.", version="1.7.0")
+logger = logging.getLogger("climate.api")
 configure_logging()
 _cors_origins = [origin.strip() for origin in os.getenv("CORS_ALLOWED_ORIGINS", "").split(",") if origin.strip()]
 if not _cors_origins:
@@ -56,34 +62,86 @@ app.include_router(ogc_router)
 
 @app.middleware("http")
 async def request_observability(request, call_next):
-    enforce_rate_limit(request)
     token = request_id_var.set(request.headers.get("x-request-id") or new_request_id())
+    started = time.perf_counter()
     try:
+        enforce_rate_limit(request)
         response = await call_next(request)
+    except HTTPException as error:
+        # Rebuild the FastAPI error response so observability headers and the
+        # request id are still applied on limiter rejections.
+        response = JSONResponse({"detail": error.detail}, status_code=error.status_code)
+    except Exception:
+        logger.exception("unhandled request error")
+        response = JSONResponse({"detail": "internal server error"}, status_code=500)
+    try:
+        duration_ms = (time.perf_counter() - started) * 1000
         response.headers["x-request-id"] = request_id_var.get()
         response.headers["x-content-type-options"] = "nosniff"
         response.headers["x-frame-options"] = "DENY"
+        response.headers["referrer-policy"] = "no-referrer"
+        response.headers["cache-control"] = response.headers.get("cache-control", "no-store")
+        log_request(
+            endpoint=request.url.path,
+            status=response.status_code,
+            duration_ms=duration_ms,
+            method=request.method,
+        )
         return response
     finally:
         request_id_var.reset(token)
 
 
 def _call(function, *args, **kwargs):
+    """Invoke a service function and map its failures to HTTP semantics.
+
+    Internal details are logged, not returned, so stack traces and filesystem
+    paths do not leak to clients.
+    """
     try:
         return function(*args, **kwargs)
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
-    except FileNotFoundError as error:
-        raise HTTPException(status_code=503, detail=str(error)) from error
-    except RuntimeError as error:
-        raise HTTPException(status_code=503, detail=str(error)) from error
-    except Exception as error:
-        raise HTTPException(status_code=500, detail=str(error)) from error
+    except (FileNotFoundError, RuntimeError) as error:
+        logger.warning("service unavailable: %s", error)
+        raise HTTPException(
+            status_code=503,
+            detail="Required scientific dataset, provider or model is unavailable.",
+        ) from error
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("service failure")
+        raise HTTPException(status_code=500, detail="internal server error")
+
+
+@app.exception_handler(FileNotFoundError)
+async def _dataset_unavailable(request: Request, exc: FileNotFoundError):
+    logger.warning("required dataset unavailable: %s", exc)
+    return JSONResponse(
+        status_code=503,
+        content={"detail": "Required scientific dataset, provider or model is unavailable."},
+    )
+
+
+@app.exception_handler(RuntimeError)
+async def _service_unavailable(request: Request, exc: RuntimeError):
+    """Map unconfigured/unavailable dependencies to 503 across every router.
+
+    Sub-routers such as ``platform_routes`` do not go through ``_call``, so a
+    missing PostGIS database or provider would otherwise surface as an opaque
+    500. Operational detail is logged, not returned.
+    """
+    logger.warning("dependency unavailable: %s", exc)
+    return JSONResponse(
+        status_code=503,
+        content={"detail": "Required scientific dataset, provider or model is unavailable."},
+    )
 
 
 @app.get("/")
 def root():
-    return {"project": "India Climate Digital Twin", "status": "online", "engine": "Python + FastAPI + India Climate Twin Core", "version": "1.5.0"}
+    return {"project": "India Climate Digital Twin", "status": "online", "engine": "Python + FastAPI + India Climate Twin Core", "version": app.version}
 
 @app.get("/api/status")
 def status(): return get_system_health()
@@ -94,9 +152,77 @@ def health(): return get_system_health()
 @app.get("/api/ready")
 def readiness():
     health_state = get_system_health()
-    required = health_state.get("checks", {})
-    ready = bool(required.get("imd_rainfall") and required.get("twin_state") and required.get("fused_features"))
-    return {"status": "ready" if ready else "not_ready", "timestamp": datetime.now(timezone.utc).isoformat(), "checks": required, "api_version": app.version}
+    checks = health_state.get("checks", {})
+    # The API can serve real science whenever the IMD observation dataset is
+    # present. The Chennai twin/fused artefacts are metropolitan pilot data and
+    # must not gate national readiness.
+    required = {"imd_rainfall": bool(checks.get("imd_rainfall"))}
+    ready = all(required.values())
+    return {
+        "status": "ready" if ready else "not_ready",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "required_checks": required,
+        "optional_checks": {k: v for k, v in checks.items() if k not in required},
+        "api_version": app.version,
+    }
+
+@app.get("/api/system/status")
+def system_status():
+    """Truthful per-capability status for the System console page and operators.
+
+    Status is derived from observed data/model availability, never from the
+    presence of an environment variable alone.
+    """
+    health_state = get_system_health()
+    providers = get_provider_registry()["providers"]
+    layer_catalog = get_climate_layer_catalog()["layers"]
+    try:
+        prithvi = get_prithvi_wxc_status()
+        prithvi_state = {
+            "status": prithvi["status"],
+            "inference_ready": prithvi["inference_ready"],
+            "blockers": prithvi["blockers"],
+        }
+    except Exception as error:
+        prithvi_state = {"status": "error", "inference_ready": False, "blockers": [str(error)]}
+
+    def capability(state: str, **extra):
+        return {"state": state, **extra}
+
+    capabilities = {
+        "api": capability("CONNECTED", version=app.version),
+        "imd_rainfall": capability(
+            "CONNECTED" if health_state["checks"].get("imd_rainfall") else "NO_DATA",
+            dataset="RF25_ind2024_rfp25.nc",
+        ),
+        "climate_providers": {
+            key: capability(
+                "PROVIDER REQUIRED" if not value["url_configured"] else "CONFIGURED (VALIDATION PENDING)",
+                env_var=value["env_var"],
+            )
+            for key, value in providers.items()
+            if key != "rainfall"
+        },
+        "risk_engine": capability("CONNECTED", scope="rainfall-only hazard screening"),
+        "extreme_events": capability("CONNECTED", scope="IMD-derived rainfall events"),
+        "twin_engine": capability("CONNECTED" if health_state["checks"].get("twin_state") else "DEGRADED"),
+        "forecast": capability("AVAILABLE", model="7-day moving-average baseline", calibrated=False),
+        "prithvi_wxc": capability("BLOCKED" if not prithvi_state["inference_ready"] else "CONNECTED", **prithvi_state),
+        "validation": capability("VALIDATION REQUIRED", note="baseline rainfall forecast metrics available; no calibrated AI forecast metrics"),
+        "district_climate": capability("PROVIDER REQUIRED", note="district geometry available; district climate aggregation not connected"),
+        "flood_twin": capability("BLOCKED", note="no validated hydraulic model configured"),
+        "ocean_and_land_layers": {
+            key: capability("PROVIDER REQUIRED" if layer_catalog[key]["status"] != "connected" else "CONNECTED")
+            for key in ("temperature", "lst", "sst", "anomalies")
+        },
+    }
+    return {
+        "contract": "india-climate-system-status/v1",
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "overall": "operational_with_declared_gaps",
+        "capabilities": capabilities,
+        "policy": "A configured provider URL is never reported as CONNECTED until it passes transport and schema validation.",
+    }
 @app.get("/api/climate/variables")
 def climate_variables(): return {"variables": CLIMATE_VARIABLES}
 @app.get("/api/climate/layers")
@@ -157,6 +283,10 @@ def climate_temperature(date: str): return _call(get_provider_layer, "temperatur
 @app.get("/api/climate/intelligence")
 def climate_intelligence(question: str = Query(..., min_length=1), date: str = Query(..., min_length=10), layer: str = Query(default="rainfall")):
     return _call(answer_question, question, date, layer)
+
+@app.get("/api/climate/intelligence/capabilities")
+def climate_intelligence_capabilities():
+    return get_intelligence_capabilities()
 @app.get("/api/climate/lst/{date}")
 def climate_lst(date: str): return _call(get_provider_layer, "lst", date)
 @app.get("/api/climate/sst/{date}")
@@ -192,6 +322,14 @@ def india_districts_geojson(state: str | None = Query(default=None, min_length=2
 def india_state_districts(state_id: str):
     location = _call(resolve_location, state_id)
     return _call(get_districts, location["name"])
+
+@app.get("/api/india/boundaries/coverage")
+def india_boundary_coverage(): return _call(get_boundary_coverage)
+
+@app.get("/api/india/state/{state_id}/districts/geojson")
+def india_state_districts_geojson(state_id: str):
+    location = _call(resolve_location, state_id)
+    return _call(get_district_geojson, location["name"])
 
 # -------------------- STATE CLIMATE TWIN --------------------
 @app.get("/api/india/states/climate/{date}")
@@ -254,6 +392,8 @@ def historical_rainfall(start: str | None = Query(default=None), end: str | None
 def forecast_baseline(horizon: int = Query(default=7, ge=1, le=14)): return _call(get_baseline_forecast, horizon)
 @app.get("/api/models")
 def models(): return _call(get_model_catalog)
+@app.get("/api/models/registry")
+def model_registry(): return _call(get_model_registry)
 
 # -------------------- PRITHVI WxC --------------------
 @app.get("/api/ai/prithvi/status")
@@ -261,7 +401,9 @@ def prithvi_status(): return _call(get_prithvi_wxc_status)
 @app.get("/api/ai/prithvi/validate")
 def prithvi_validate(): return _call(validate_prithvi_inputs)
 @app.post("/api/ai/prithvi/load")
-def prithvi_load(): return _call(run_local_inference)
+def prithvi_load(request: Request):
+    require_operator(request)
+    return _call(run_local_inference)
 @app.get("/api/ai/prithvi/input")
 def prithvi_input(path: str | None = Query(default=None, min_length=1)):
     if not path:

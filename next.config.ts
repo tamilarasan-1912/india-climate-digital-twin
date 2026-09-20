@@ -3,29 +3,43 @@ import type { NextConfig } from "next";
 // Render-hosted FastAPI backend. NEXT_PUBLIC_API_URL can override this in Vercel.
 const API = (process.env.NEXT_PUBLIC_API_URL || "https://india-climate-digital-twin-api.onrender.com").replace(/\/$/, "");
 
+// Every backend API group must be reachable through the frontend origin so the
+// browser never needs a cross-origin request and CORS stays tight.
+const API_PREFIXES = [
+  "rainfall",
+  "climate",
+  "india",
+  "v1",
+  "gods-eye",
+  "extreme-events",
+  "risk",
+  "twin",
+  "historical",
+  "forecast",
+  "models",
+  "ai",
+  "explain",
+  "scenarios",
+  "system",
+];
+
 const nextConfig: NextConfig = {
   async rewrites() {
     return [
-      { source: "/api/rainfall/:path*", destination: `${API}/api/rainfall/:path*` },
-      { source: "/api/climate/:path*", destination: `${API}/api/climate/:path*` },
-      { source: "/api/india/:path*", destination: `${API}/api/india/:path*` },
-      { source: "/api/v1/:path*", destination: `${API}/api/v1/:path*` },
-      { source: "/ogc/:path*", destination: `${API}/ogc/:path*` },
-      { source: "/api/gods-eye/:path*", destination: `${API}/api/gods-eye/:path*` },
-      { source: "/api/extreme-events/:path*", destination: `${API}/api/extreme-events/:path*` },
-      { source: "/api/risk/:path*", destination: `${API}/api/risk/:path*` },
-      { source: "/api/twin/:path*", destination: `${API}/api/twin/:path*` },
-      { source: "/api/historical/:path*", destination: `${API}/api/historical/:path*` },
-      { source: "/api/forecast/:path*", destination: `${API}/api/forecast/:path*` },
-      { source: "/api/models", destination: `${API}/api/models` },
-      { source: "/api/ai/:path*", destination: `${API}/api/ai/:path*` },
-      { source: "/api/explain/:path*", destination: `${API}/api/explain/:path*` },
-      { source: "/api/scenarios/:path*", destination: `${API}/api/scenarios/:path*` },
+      ...API_PREFIXES.map(prefix => ({
+        source: `/api/${prefix}/:path*`,
+        destination: `${API}/api/${prefix}/:path*`,
+      })),
+      ...API_PREFIXES.map(prefix => ({
+        source: `/api/${prefix}`,
+        destination: `${API}/api/${prefix}`,
+      })),
       { source: "/api/validation", destination: `${API}/api/validation` },
       { source: "/api/provenance", destination: `${API}/api/provenance` },
       { source: "/api/health", destination: `${API}/api/health` },
       { source: "/api/status", destination: `${API}/api/status` },
       { source: "/api/ready", destination: `${API}/api/ready` },
+      { source: "/ogc/:path*", destination: `${API}/ogc/:path*` },
     ];
   },
 };

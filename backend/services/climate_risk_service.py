@@ -6,6 +6,9 @@ from typing import Any
 import numpy as np
 import xarray as xr
 
+from backend.services.rainfall_service import load_dataset as _read_dataset
+from backend.services.rainfall_service import read_dataset as _read_dataset_guard
+
 
 # ============================================================
 # CONFIGURATION
@@ -47,16 +50,17 @@ EXTREME_MAX_SCORE = 100.0
 # ============================================================
 
 def load_dataset() -> xr.Dataset:
-    """
-    Open the IMD rainfall NetCDF dataset.
-    """
+    """Return the shared read-only IMD rainfall dataset.
 
-    if not DATA_FILE.exists():
-        raise FileNotFoundError(
-            f"Rainfall dataset not found: {DATA_FILE}"
-        )
+    Delegates to :mod:`backend.services.rainfall_service` so the process keeps a
+    single cached NetCDF handle that no caller closes.
+    """
+    return _read_dataset()
 
-    return xr.open_dataset(DATA_FILE)
+
+def read_dataset():
+    """Locked context manager over the shared rainfall dataset."""
+    return _read_dataset_guard()
 
 
 # ============================================================
@@ -373,9 +377,7 @@ def get_climate_risk_grid(
     Returns a GeoJSON FeatureCollection.
     """
 
-    dataset = load_dataset()
-
-    try:
+    with read_dataset() as dataset:
 
         selected = validate_date(
             dataset,
@@ -624,9 +626,6 @@ def get_climate_risk_grid(
             },
         }
 
-    finally:
-
-        dataset.close()
 
 
 # ============================================================

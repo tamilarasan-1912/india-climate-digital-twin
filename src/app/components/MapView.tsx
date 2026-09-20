@@ -210,8 +210,13 @@ export default function MapView({
   const [extremeEventsError, setExtremeEventsError] =
     useState<string | null>(null);
 
-  const [riskLoaded, setRiskLoaded] =
-    useState(false);
+  // Real feature counts from the connected APIs. These are never hardcoded:
+  // the badge shows NO DATA until an actual response provides a count.
+  const [extremeEventsCount, setExtremeEventsCount] =
+    useState<number | null>(null);
+
+  const [riskCount, setRiskCount] =
+    useState<number | null>(null);
 
   const [riskError, setRiskError] =
     useState<string | null>(null);
@@ -614,6 +619,7 @@ export default function MapView({
           );
 
           setExtremeEventsLoaded(true);
+          setExtremeEventsCount(extremeEventGeoJSON.features.length);
           setExtremeEventsError(null);
         } catch (error) {
           console.error(
@@ -669,7 +675,7 @@ export default function MapView({
             riskGeoJSON.features.length
           );
 
-          setRiskLoaded(true);
+          setRiskCount(riskGeoJSON.features.length);
         } catch (error) {
           console.error(
             "Climate risk loading error:",
@@ -2237,10 +2243,36 @@ export default function MapView({
               EXTREME EVENTS:{" "}
 
               {extremeEventsLoaded
-                ? "122 EVENTS"
+                ? extremeEventsCount === null
+                  ? "NO DATA"
+                  : `${extremeEventsCount} POINTS`
                 : extremeEventsError
                   ? "ERROR"
                   : "LOADING"}
+            </div>
+
+            <div
+              style={{
+                marginTop:
+                  "4px",
+
+                fontSize:
+                  "10px",
+
+                fontWeight:
+                  400,
+
+                opacity:
+                  0.75,
+              }}
+            >
+              CLIMATE RISK:{" "}
+
+              {riskCount === null
+                ? riskError
+                  ? "ERROR"
+                  : "LOADING"
+                : `${riskCount} GRID POINTS`}
             </div>
         </div>
       )}

@@ -1,5 +1,6 @@
 from pathlib import Path
 from functools import lru_cache
+from threading import RLock
 
 import numpy as np
 import xarray as xr
@@ -28,10 +29,7 @@ def _cached_dataset():
 
 
 def load_dataset():
-    return _cached_dataset()
-
-    """
-    Open the IMD rainfall NetCDF dataset.
+    """Open the IMD rainfall NetCDF dataset.
 
     Dataset structure:
 
@@ -42,14 +40,40 @@ def load_dataset():
 
     Rainfall unit:
         mm
+
+    The handle is process-wide and cached: it is a read-only view used by every
+    request, so callers must not close it (see ``read_dataset``).
     """
+    return _cached_dataset()
 
-    if not DATA_FILE.exists():
-        raise FileNotFoundError(
-            f"Rainfall dataset not found: {DATA_FILE}"
-        )
 
-    return xr.open_dataset(DATA_FILE)
+# xarray/netCDF4 handles are not thread-safe for concurrent reads. FastAPI runs
+# synchronous endpoints in a thread pool, so serialise all dataset access.
+_DATASET_LOCK = RLock()
+
+
+def read_dataset():
+    """Context manager yielding the shared, read-only dataset under a lock.
+
+    Using this instead of closing the handle avoids the classic bug where one
+    request closes the cached dataset and every later request fails until the
+    process restarts.
+    """
+    class _Guard:
+        def __enter__(self):
+            _DATASET_LOCK.acquire()
+            try:
+                self._dataset = _cached_dataset()
+            except Exception:
+                _DATASET_LOCK.release()
+                raise
+            return self._dataset
+
+        def __exit__(self, *exc_info) -> bool:
+            _DATASET_LOCK.release()
+            return False
+
+    return _Guard()
 
 
 # ============================================================
@@ -61,9 +85,7 @@ def get_dataset_info():
     Return metadata about the IMD rainfall dataset.
     """
 
-    dataset = load_dataset()
-
-    try:
+    with read_dataset() as dataset:
         rainfall = dataset["RAINFALL"]
 
         return {
@@ -133,8 +155,6 @@ def get_dataset_info():
             },
         }
 
-    finally:
-        dataset.close()
 
 
 # ============================================================
@@ -219,9 +239,7 @@ def get_daily_rainfall(
         rainfall values
     """
 
-    dataset = load_dataset()
-
-    try:
+    with read_dataset() as dataset:
         selected = validate_date(
             dataset,
             date
@@ -257,8 +275,6 @@ def get_daily_rainfall(
             ).tolist(),
         }
 
-    finally:
-        dataset.close()
 
 
 # ============================================================
@@ -273,9 +289,7 @@ def get_daily_statistics(
     field on a specific date.
     """
 
-    dataset = load_dataset()
-
-    try:
+    with read_dataset() as dataset:
         selected = validate_date(
             dataset,
             date
@@ -321,8 +335,6 @@ def get_daily_statistics(
             ),
         }
 
-    finally:
-        dataset.close()
 
 
 # ============================================================
@@ -395,9 +407,7 @@ def get_rainfall_grid(
         }
     """
 
-    dataset = load_dataset()
-
-    try:
+    with read_dataset() as dataset:
         selected = validate_date(
             dataset,
             date
@@ -464,8 +474,6 @@ def get_rainfall_grid(
             "features": features,
         }
 
-    finally:
-        dataset.close()
 
 
 # ============================================================
@@ -481,9 +489,7 @@ def get_rainfall_grid_info(
     grid values.
     """
 
-    dataset = load_dataset()
-
-    try:
+    with read_dataset() as dataset:
         selected = validate_date(
             dataset,
             date
@@ -553,6 +559,3 @@ def get_rainfall_grid_info(
                     ),
             },
         }
-
-    finally:
-        dataset.close()

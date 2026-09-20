@@ -155,6 +155,10 @@ def render_rainfall_xyz_tile(
     if size not in (256, 512):
         raise ValueError("Tile size must be 256 or 512")
     west, south, east, north = tile_xyz_bounds(z, x, y)
+    if west >= 180.0:
+        # Tile lies entirely east of the antimeridian: no data, empty tile.
+        return _transparent_png(size)
+    east = min(east, 179.999)
     with xr.open_dataset(dataset_path) as ds:
         variable = "RAINFALL"
         if variable not in ds:
@@ -184,12 +188,26 @@ def render_rainfall_xyz_tile(
         rgba = np.zeros((size, size, 4), dtype=np.uint8)
         if np.any(valid):
             # Stable visualization ramp; values remain provider-derived.
+            # Compute in float, clip, then cast so NaN/overflow warnings cannot
+            # corrupt the ramp.
             t = np.clip(grid / 100.0, 0.0, 1.0)
-            rgba[..., 0] = np.where(valid, (255 * t).astype(np.uint8), 0)
-            rgba[..., 1] = np.where(valid, (220 * (1.0 - t)).astype(np.uint8), 0)
-            rgba[..., 2] = np.where(valid, 255 - rgba[..., 0] // 2, 0)
-            rgba[..., 3] = np.where(valid, 210, 0)
+            red = np.where(valid, np.clip(255.0 * t, 0, 255), 0).astype(np.uint8)
+            green = np.where(valid, np.clip(220.0 * (1.0 - t), 0, 255), 0).astype(np.uint8)
+            blue = np.where(valid, np.clip(255.0 - red.astype(np.float64) / 2.0, 0, 255), 0).astype(np.uint8)
+            rgba[..., 0] = red
+            rgba[..., 1] = green
+            rgba[..., 2] = blue
+            rgba[..., 3] = np.where(valid, 210, 0).astype(np.uint8)
         image = Image.fromarray(rgba, mode="RGBA")
         buf = BytesIO()
         image.save(buf, format="PNG", optimize=True)
         return buf.getvalue()
+
+
+def _transparent_png(size: int) -> bytes:
+    from io import BytesIO
+    from PIL import Image
+
+    buf = BytesIO()
+    Image.new("RGBA", (size, size), (0, 0, 0, 0)).save(buf, format="PNG")
+    return buf.getvalue()

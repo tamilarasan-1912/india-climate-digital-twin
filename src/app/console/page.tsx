@@ -7,7 +7,7 @@ import GodsEyeOperations from "../components/GodsEyeOperations";
 type LayerState = { rainfall: boolean; temperature: boolean; lst: boolean; sst: boolean; anomalies: boolean; risk: boolean; events: boolean };
 type Modal = "notifications" | "account" | "export" | "location" | null;
 
-const NAV = [["▦", "Overview"], ["◈", "Digital Twin"], ["◉", "Observations"], ["◒", "Climate"], ["↗", "Forecast"], ["!", "Risk"], ["⚡", "Extreme Events"], ["⌁", "What-If"], ["◷", "Historical"], ["✓", "Validation"], ["⌘", "Provenance"], ["⚙", "System"]] as const;
+const NAV = [["▦", "Overview"], ["◈", "Digital Twin"], ["◉", "Observations"], ["◒", "Climate"], ["↗", "Forecast"], ["!", "Risk"], ["⚡", "Extreme Events"], ["⌁", "What-If"], ["◷", "Historical"], ["✓", "Validation"], ["⌘", "Provenance"], ["✦", "Assistant"], ["⚙", "System"]] as const;
 const STATE_NAMES: Record<string, string> = { "tamil nadu": "IN-TN", "karnataka": "IN-KA", "kerala": "IN-KL", "maharashtra": "IN-MH", "delhi": "IN-DL", "west bengal": "IN-WB", "andhra pradesh": "IN-AP", "telangana": "IN-TG", "gujarat": "IN-GJ", "rajasthan": "IN-RJ", "odisha": "IN-OR", "uttar pradesh": "IN-UP", "madhya pradesh": "IN-MP", "punjab": "IN-PB", "bihar": "IN-BR", "assam": "IN-AS" };
 
 function Card({ title, children, action }: { title: string; children: ReactNode; action?: ReactNode }) { return <section className="card"><div className="card-head"><span>{title}</span>{action}</div><div className="card-body">{children}</div></section>; }
@@ -38,6 +38,10 @@ export default function ConsolePage() {
   const [simulation, setSimulation] = useState<any>(null);
   const [simulating, setSimulating] = useState(false);
   const [historical, setHistorical] = useState<any>(null);
+  const [assistantQuestion, setAssistantQuestion] = useState("What was rainfall in Tamil Nadu on this date?");
+  const [assistantAnswer, setAssistantAnswer] = useState<any>(null);
+  const [assistantBusy, setAssistantBusy] = useState(false);
+  const [assistantLayer, setAssistantLayer] = useState("rainfall");
 
   const apiFetch = useCallback(async (key: string, url: string) => { try { const r = await fetch(url, { cache: "no-store" }); return [key, r.ok ? await r.json() : null] as const; } catch { return [key, null] as const; } }, []);
   const refresh = useCallback(async () => {
@@ -47,11 +51,23 @@ export default function ConsolePage() {
       apiFetch("events", `/api/extreme-events/summary/${date}`), apiFetch("forecast", `/api/twin/next?date=${date}&horizon=${horizon}`), apiFetch("twin", `/api/twin/summary?date=${date}`),
       apiFetch("hierarchy", "/api/india/hierarchy"), apiFetch("variables", "/api/climate/variables"), apiFetch("models", "/api/models"), apiFetch("validation", "/api/validation"),
       apiFetch("provenance", "/api/provenance"), apiFetch("prithvi", "/api/ai/prithvi/status"), apiFetch("historical", `/api/historical/rainfall?start=${startDate}&end=${endDate}&limit=365`),
+      apiFetch("system", "/api/system/status"), apiFetch("intelligence", "/api/climate/intelligence/capabilities"),
     ]);
     setData(Object.fromEntries(entries)); setHistorical(Object.fromEntries(entries).historical); setClimateLayerStatus(Object.fromEntries(entries).layerStatus); setLoading(false); setRefreshing(false);
   }, [apiFetch, date, endDate, horizon, startDate]);
-  useEffect(() => { refresh(); }, [refresh]);
-  useEffect(() => { if (selectedId === "IN") { setStateData(null); return; } let alive = true; apiFetch("state", `/api/india/state/${selectedId}/twin/${date}`).then(([, d]) => { if (alive) setStateData(d); }); return () => { alive = false; }; }, [apiFetch, selectedId, date]);
+  // The mount fetch is intentional: the loading indicator is part of the
+  // initial render, not a cascading update from other state.
+  useEffect(() => { let cancelled = false; (async () => { await refresh(); if (cancelled) return; })(); return () => { cancelled = true; }; }, [refresh]);
+  useEffect(() => {
+    let alive = true;
+    if (selectedId === "IN") {
+      // Defer so the effect body itself does not schedule a synchronous render.
+      Promise.resolve().then(() => { if (alive) setStateData(null); });
+    } else {
+      apiFetch("state", `/api/india/state/${selectedId}/twin/${date}`).then(([, d]) => { if (alive) setStateData(d); });
+    }
+    return () => { alive = false; };
+  }, [apiFetch, selectedId, date]);
 
   const chooseState = useCallback((name: string) => {
     const normalized = name.trim().toLowerCase();
@@ -63,12 +79,13 @@ export default function ConsolePage() {
   }, [data.hierarchy]);
   const doSearch = () => { const q = search.trim().toLowerCase(); if (q === "india") chooseState("India"); else chooseState(q); setSearch(""); };
   const runSimulation = async () => { setSimulating(true); setSimulation(null); try { const qs = new URLSearchParams({ base_date: date, precipitation_delta_pct: String(scenario.precip), temperature_delta_c: String(scenario.temp), sea_level_rise_m: String(scenario.sea), scenario: selectedName }); const r = await fetch(`/api/twin/what-if?${qs}`, { cache: "no-store" }); setSimulation(r.ok ? await r.json() : null); } catch { setSimulation(null); } finally { setSimulating(false); } };
+  const askAssistant = async (question?: string) => { const q = (question ?? assistantQuestion).trim(); if (!q) return; setAssistantQuestion(q); setAssistantBusy(true); setAssistantAnswer(null); try { const qs = new URLSearchParams({ question: q, date, layer: assistantLayer }); const r = await fetch(`/api/climate/intelligence?${qs}`, { cache: "no-store" }); setAssistantAnswer(r.ok ? await r.json() : { status: "UNAVAILABLE", answer: "Climate intelligence service unavailable." }); } catch { setAssistantAnswer({ status: "UNAVAILABLE", answer: "Climate intelligence service unavailable." }); } finally { setAssistantBusy(false); } };
   const exportJSON = () => { const payload = { project: "India Climate Digital Twin", scope: "India", selected: { id: selectedId, name: selectedName }, observation_date: date, twin: selectedId === "IN" ? data.twin : stateData, risk: data.risk, forecast: data.forecast, scenario: simulation, provenance: data.provenance }; const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" }); const u = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = u; a.download = `india-climate-twin-${selectedId}-${date}.json`; a.click(); URL.revokeObjectURL(u); setModal("export"); };
   const risk = data.risk; const rainfall = data.rainfall; const events = data.events; const twin = selectedId === "IN" ? data.twin : stateData; const forecast = data.forecast; const metrics = twin?.twin?.state_variables ?? twin?.state_variables ?? {};
   const map = <div className="map-wrap"><GodsEyeOperations date={date} onDateChange={setDate}/><div className="godseye-hud"><span>GOD&#39;S-EYE / INDIA</span><b>CLIMATE INTELLIGENCE</b><small>{date} · PROVIDER-BACKED OBSERVATIONS</small></div><ClimateMap layers={layers} date={date} selectedState={selectedName} onStateSelect={chooseState} onCoords={(lat, lon) => setCoords(`${lat.toFixed(4)}° N, ${lon.toFixed(4)}° E`)} zoomRequest={zoom}/><div className="map-actions"><button onClick={() => setZoom({ type: "in", nonce: Date.now() })}>+</button><button onClick={() => setZoom({ type: "out", nonce: Date.now() })}>−</button><button onClick={() => setZoom({ type: "reset", nonce: Date.now() })}>⌂</button></div><div className="map-date">OBSERVATION <b>{date}</b></div><div className="map-layers"><b>LAYERS</b>{(["rainfall", "temperature", "lst", "sst", "anomalies", "risk", "events"] as const).map(k => <button key={k} onClick={() => setLayers(x => ({ ...x, [k]: !x[k] }))}>{k === "lst" ? "LAND SURFACE TEMP" : k === "sst" ? "SEA SURFACE TEMP" : k.toUpperCase()}<span className={layers[k] ? "switch on" : "switch"}/></button>)}</div><div className="map-coords">{coords}</div></div>;
 
   let body: ReactNode;
-  if (nav === "Overview" || nav === "Digital Twin") body = <div className="dashboard"><div className="metrics"><Metric label="SELECTED ENTITY" value={selectedName}/><Metric label="TWIN STATUS" value={val(twin,["status"], data.health ? "CONNECTED" : null)}/><Metric label="OBSERVATION" value={date}/><Metric label="DATA SOURCE" value="IMD RF25"/></div>{map}<div className="bottom-grid"><Card title="WHAT NOW: CURRENT STATE"><div className="metric-grid"><Metric label="MEAN RAINFALL" value={val(rainfall,["statistics","mean_rainfall_mm"], val(metrics,["rainfall_mean_mm"]))} unit="mm"/><Metric label="MAX RAINFALL" value={val(rainfall,["statistics","maximum_rainfall_mm"], val(metrics,["rainfall_max_mm"]))} unit="mm"/><Metric label="MEAN HAZARD" value={val(risk,["statistics","mean_hazard_score"], val(metrics,["hazard_mean"]))}/><Metric label="MAX HAZARD" value={val(risk,["statistics","maximum_hazard_score"], val(metrics,["hazard_max"]))}/></div></Card><Card title="RISK DISTRIBUTION"><RiskBars risk={risk}/></Card></div></div>;
+  if (nav === "Overview" || nav === "Digital Twin") body = <div className="dashboard"><div className="metrics"><Metric label="SELECTED ENTITY" value={selectedName}/><Metric label="TWIN STATUS" value={val(twin,["status"], data.health ? "CONNECTED" : null)}/><Metric label="OBSERVATION" value={date}/><Metric label="DATA SOURCE" value="IMD RF25"/></div>{map}<div className="bottom-grid"><Card title="WHAT NOW: CURRENT STATE"><div className="metric-grid"><Metric label="MEAN RAINFALL" value={val(rainfall,["rainfall","mean_mm"], val(metrics,["rainfall_mean_mm"]))} unit="mm"/><Metric label="MAX RAINFALL" value={val(rainfall,["rainfall","maximum_mm"], val(metrics,["rainfall_max_mm"]))} unit="mm"/><Metric label="MEAN HAZARD" value={val(risk,["statistics","mean_hazard_score"], val(metrics,["hazard_mean"]))}/><Metric label="MAX HAZARD" value={val(risk,["statistics","maximum_hazard_score"], val(metrics,["hazard_max"]))}/></div></Card><Card title="RISK DISTRIBUTION"><RiskBars risk={risk}/></Card></div></div>;
   else if (nav === "Observations") body = <div className="two"><Card title="OBSERVATION SOURCES"><Source name="IMD RF25" value={data.rainfall ? "AVAILABLE" : "UNAVAILABLE"}/><Source name="Sentinel / Prithvi-EO" value={data.prithvi ? "SERVICE STATUS AVAILABLE" : "UNAVAILABLE"}/><Source name="Climate variable catalog" value={data.variables ? "AVAILABLE" : "UNAVAILABLE"}/></Card><Card title="PROVENANCE"><Json data={data.provenance}/></Card></div>;
   else if (nav === "Climate") body = <div className="two"><Card title="CLIMATE VARIABLE CATALOG"><Json data={data.variables}/><div className="layer-status"><b>VISUAL LAYER PROVIDERS</b><Json data={climateLayerStatus}/></div></Card><Card title="CURRENT RAINFALL"><Json data={rainfall}/></Card></div>;
   else if (nav === "Forecast") body = <div className="two"><Card title="WHAT NEXT / FORECAST" action={<div className="seg">{[1,3,7,14].map(x => <button className={horizon===x?"sel":""} key={x} onClick={() => setHorizon(x)}>{x}D</button>)}</div>}><ForecastView data={forecast}/></Card><Card title="MODEL CATALOG"><Json data={data.models}/></Card></div>;
@@ -78,6 +95,7 @@ export default function ConsolePage() {
   else if (nav === "Historical") body = <div className="two"><Card title="HISTORICAL RAINFALL"><div className="date-row"><label>START <input type="date" value={startDate} onChange={e=>setStartDate(e.target.value)}/></label><label>END <input type="date" value={endDate} onChange={e=>setEndDate(e.target.value)}/></label><button className="primary small" onClick={refresh}>LOAD</button></div><Historical data={historical}/></Card><Card title="TIME CONTROL"><label className="timeline-label">OBSERVATION DATE <b>{date}</b><input type="date" value={date} onChange={e=>setDate(e.target.value)}/></label><div className="timeline"><span>HISTORICAL</span><span>OBSERVED</span><span>FORECAST</span></div></Card></div>;
   else if (nav === "Validation") body = <div className="two"><Card title="MODEL & DATA VALIDATION"><Json data={data.validation}/></Card><Card title="MODEL STATUS"><Json data={data.models}/></Card></div>;
   else if (nav === "Provenance") body = <div className="single"><Card title="DATA PROVENANCE"><Json data={data.provenance}/></Card></div>;
+  else if (nav === "Assistant") body = <div className="two"><Card title="CLIMATE INTELLIGENCE ASSISTANT"><p className="notice">Answers are assembled from this platform&apos;s validated APIs and observations. The assistant never invents climate values; when a variable or provider is unavailable it says so.</p><label className="timeline-label">QUESTION<input value={assistantQuestion} onChange={e=>setAssistantQuestion(e.target.value)} onKeyDown={e=>e.key==="Enter"&&askAssistant()} placeholder="e.g. Which states had extreme rainfall?"/></label><div className="date-row"><label>LAYER<select value={assistantLayer} onChange={e=>setAssistantLayer(e.target.value)}>{["rainfall","temperature","lst","sst","anomalies"].map(l=><option key={l} value={l}>{l.toUpperCase()}</option>)}</select></label><button className="primary" disabled={assistantBusy} onClick={()=>askAssistant()}>{assistantBusy?"QUERYING…":"ASK"}</button></div><div className="chip-row">{["What was rainfall in Tamil Nadu on this date?","Which states had extreme rainfall?","What is the current climate state?","Why is temperature unavailable?","Is Prithvi-WxC currently available?","What forecast model is being used?"].map(q=><button className="chip" key={q} onClick={()=>askAssistant(q)}>{q}</button>)}</div><div className="assistant-answer"><Status ok={assistantAnswer?.status==="AVAILABLE"} text={assistantAnswer?.status ?? "AWAITING QUESTION"}/><p>{assistantAnswer?.answer ?? "Ask a question about rainfall, risk, extreme events, models or provenance."}</p><Json data={assistantAnswer}/></div></Card><Card title="ASSISTANT CAPABILITIES"><Json data={data.intelligence}/></Card></div>;
   else if (nav === "System") body = <SystemPanel data={data} refreshing={refreshing} onRefresh={refresh}/>;
   else body = <div className="single"><Card title="INDIA ADMINISTRATIVE HIERARCHY"><Hierarchy data={data.hierarchy} selected={selectedId} onSelect={id=>{setSelectedId(id); const s=data.hierarchy?.states_and_union_territories?.find((x:any)=>x.id===id); setSelectedName(s?.name?.toUpperCase() ?? "INDIA");}}/></Card></div>;
 
@@ -90,6 +108,28 @@ function Slider({label,value,min,max,step,unit,onChange}:{label:string;value:num
 function ForecastView({data}:{data:any}){if(!data)return <div className="empty">NO DATA / SERVICE UNAVAILABLE</div>;return <div><div className="forecast-meta"><span>MODEL <b>{data.model??data.method??"BASELINE"}</b></span><span>HORIZON <b>{data.horizon??"—"}</b></span></div><Json data={data}/></div>}
 function Historical({data}:{data:any}){if(!data)return <div className="empty">NO DATA / SERVICE UNAVAILABLE</div>;return Array.isArray(data)?<div className="history-list">{data.slice(0,30).map((x:any,i:number)=><div key={i}><span>{x.date??x.TIME??"—"}</span><b>{x.rainfall_mm??x.value??"NO DATA"}</b></div>)}</div>:<Json data={data}/>}
 function Hierarchy({data,selected,onSelect}:{data:any;selected:string;onSelect:(id:string)=>void}){return <div className="hierarchy"><button className={selected==="IN"?"node active":"node"} onClick={()=>onSelect("IN")}>🇮🇳 INDIA</button>{data?.states_and_union_territories?.map((s:any)=><button className={selected===s.id?"node active":"node"} key={s.id} onClick={()=>onSelect(s.id)}>{s.name}<small>{s.id}</small></button>)}</div>}
-function SystemPanel({data,refreshing,onRefresh}:{data:any;refreshing:boolean;onRefresh:()=>void}){const items=[["API",data.health],["IMD RF25",data.rainfall],["Risk Engine",data.risk],["Extreme Events",data.events],["Twin Engine",data.twin],["Forecast",data.forecast],["Prithvi WxC",data.prithvi],["Validation",data.validation]];return <div className="system-grid"><Card title="SYSTEM DIAGNOSTICS" action={<button className="outline" onClick={onRefresh}>{refreshing?"SYNCING":"REFRESH"}</button>}>{items.map(([n,v])=><div className="service" key={n as string}><span>{n}</span><Status ok={!!v}/></div>)}</Card><Card title="DIGITAL TWIN HEALTH"><Json data={data.twin}/></Card></div>}
+function SystemPanel({data,refreshing,onRefresh}:{data:any;refreshing:boolean;onRefresh:()=>void}){
+  // Prefer the backend's truthful capability contract; never infer CONNECTED
+  // from the mere presence of a fetched object.
+  const capabilities: Record<string, any> = data.system?.capabilities ?? {};
+  const stateClass = (state: string) => {
+    const upper = String(state ?? "").toUpperCase();
+    if (upper.startsWith("CONNECTED") || upper === "AVAILABLE") return "ok";
+    if (upper === "DEGRADED" || upper.startsWith("VALIDATION") || upper.startsWith("CONFIGURED")) return "warn";
+    return "bad";
+  };
+  const rows: [string, any][] = Object.keys(capabilities).length
+    ? Object.entries(capabilities).flatMap(([name, value]: [string, any]) => {
+        if (value && typeof value === "object" && !("state" in value)) {
+          return Object.entries(value).map(([sub, subValue]: [string, any]) => [`${name} / ${sub}`, subValue] as [string, any]);
+        }
+        return [[name, value] as [string, any]];
+      })
+    : [["API", data.health], ["IMD RF25", data.rainfall], ["Risk Engine", data.risk], ["Extreme Events", data.events], ["Twin Engine", data.twin], ["Forecast", data.forecast], ["Prithvi WxC", data.prithvi], ["Validation", data.validation]].map(([n, v]) => [n as string, { state: v ? "AVAILABLE" : "NO DATA" }]);
+  return <div className="system-grid"><Card title="SYSTEM DIAGNOSTICS" action={<button className="outline" onClick={onRefresh}>{refreshing?"SYNCING":"REFRESH"}</button>}>
+    {rows.map(([name, entry]) => <div className="service" key={name}><span>{name}</span><span className={`status ${stateClass(entry?.state)}`}><i />{entry?.state ?? "NO DATA"}</span></div>)}
+    <p className="notice">{data.system?.policy ?? "Capability state is derived from observed data and model availability."}</p>
+  </Card><Card title="STATUS CONTRACT"><Json data={data.system}/></Card></div>
+}
 function Modal({type,onClose,data,onExport}:{type:Modal;onClose:()=>void;data:any;onExport:()=>void}){return <div className="modal-bg" onClick={onClose}><div className="modal" onClick={e=>e.stopPropagation()}><button className="close" onClick={onClose}>×</button>{type==="notifications"?<><h2>ACTIVE BULLETINS</h2><p>Derived from connected risk and extreme-event services.</p><Status ok={!!data.events} text={data.events?`${data.events.summary?.total_extreme_points??0} EXTREME POINTS`:"NO EVENT DATA"}/><Json data={data.events}/></>:type==="account"?<><h2>SYSTEM PROFILE</h2><p>INDIA CLIMATE DIGITAL TWIN</p><p>Scope: INDIA</p><p>Frontend: Next.js / MapLibre</p><p>Backend: FastAPI</p><Status ok={!!data.health}/></>:<><h2>EXPORT READY</h2><p>The current synchronized twin payload was exported as JSON.</p><button className="primary" onClick={onExport}>EXPORT AGAIN</button></>}</div></div>}
 function downloadEvents(events:any){if(!events?.summary)return;const rows=["date,total_extreme_points,heavy_points,very_heavy_points,extremely_heavy_points,maximum_rainfall_mm",`${events.date},${events.summary.total_extreme_points??""},${events.summary.heavy_points??""},${events.summary.very_heavy_points??""},${events.summary.extremely_heavy_points??""},${events.summary.maximum_rainfall_mm??""}`];const b=new Blob([rows.join("\n")],{type:"text/csv"});const u=URL.createObjectURL(b);const a=document.createElement("a");a.href=u;a.download=`extreme-events-${events.date}.csv`;a.click();URL.revokeObjectURL(u)}

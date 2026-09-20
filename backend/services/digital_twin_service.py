@@ -20,6 +20,7 @@ from backend.services.baseline_forecast_service import (
     get_daily_series,
     forecast_next_day,
 )
+from backend.services.model_registry import get_model_catalog, get_model_registry
 from backend.services.climate_risk_service import (
     calculate_point_risk,
     calculate_risk_score,
@@ -99,11 +100,7 @@ def get_baseline_forecast(horizon: int = 7) -> dict[str, Any]:
 
 
 def get_model_catalog() -> dict[str, Any]:
-    return {"models": [
-        {"name": "IMD rainfall baseline", "type": "statistical baseline", "status": "active", "metrics": "available through /api/validation"},
-        {"name": "Prithvi-EO V2 tiny", "type": "earth observation foundation model", "status": "feature extraction available", "metrics": "not calibrated for forecasting"},
-        get_ai_model_info(),
-    ]}
+    return get_model_registry()
 
 
 def get_validation_summary() -> dict[str, Any]:

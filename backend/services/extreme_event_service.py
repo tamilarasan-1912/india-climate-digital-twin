@@ -6,6 +6,9 @@ from typing import Any
 import numpy as np
 import xarray as xr
 
+from backend.services.rainfall_service import load_dataset as _read_dataset
+from backend.services.rainfall_service import read_dataset as _read_dataset_guard
+
 
 # ============================================================
 # CONFIGURATION
@@ -48,21 +51,17 @@ EXTREMELY_HEAVY_THRESHOLD_MM = 204.5
 # ============================================================
 
 def load_dataset() -> xr.Dataset:
+    """Return the shared read-only IMD rainfall dataset.
+
+    Delegates to :mod:`backend.services.rainfall_service` so the process keeps a
+    single cached NetCDF handle that no caller closes.
     """
-    Open the IMD rainfall NetCDF dataset.
+    return _read_dataset()
 
-    Returns
-    -------
-    xarray.Dataset
-        Open rainfall dataset.
-    """
 
-    if not DATA_FILE.exists():
-        raise FileNotFoundError(
-            f"Rainfall dataset not found: {DATA_FILE}"
-        )
-
-    return xr.open_dataset(DATA_FILE)
+def read_dataset():
+    """Locked context manager over the shared rainfall dataset."""
+    return _read_dataset_guard()
 
 
 # ============================================================
@@ -222,9 +221,7 @@ def detect_extreme_rainfall(
         Structured extreme-event result.
     """
 
-    dataset = load_dataset()
-
-    try:
+    with read_dataset() as dataset:
         rainfall = validate_date(
             dataset,
             date,
@@ -435,8 +432,6 @@ def detect_extreme_rainfall(
             "events": events,
         }
 
-    finally:
-        dataset.close()
 
 
 # ============================================================

@@ -98,6 +98,81 @@ The repository includes `database/migrations/001_industry_core.sql` and a local 
 - Long-term 2030/2050/2100 scenarios require validated climate projection datasets and are not implied by simple perturbations.
 - Large model weights and climate archives are external dependencies; normal API requests must not download multi-GB assets.
 
+## Status and capability reporting
+
+`/api/system/status` returns a per-capability contract used by the System console
+page. Each capability reports a state derived from observed data or model
+availability — never from the presence of an environment variable:
+
+```text
+CONNECTED · AVAILABLE · DEGRADED · NO DATA · PROVIDER REQUIRED · BLOCKED · VALIDATION REQUIRED
+```
+
+A provider URL that is set but unvalidated is reported as
+`CONFIGURED (VALIDATION PENDING)`. `/api/v1/security/status` reports the
+administrative boundary truthfully as `enforced` or `disabled_development_mode`.
+
+## Terminology policy
+
+Scientific labelling is enforced in the API and the UI:
+
+| What it is | What it is called |
+|---|---|
+| 7-day moving average extrapolation | `BASELINE FORECAST` — not an AI weather model |
+| Mathematical perturbation of a layer | `SENSITIVITY EXPERIMENT` / `coupling-aware sensitivity analysis` — not a climate prediction |
+| Deterministic projection/SVD of fused features | `deterministic climate-state representation` — not a trained neural latent |
+| Unvalidated provider response | `NO_DATA` with `provider_required: true` |
+| Generated alert text | `message_generation` — distinct from `alert_issuance` |
+
+## Environment variables
+
+Every variable is documented in `.env.example`. Configuration alone never makes
+a provider `CONNECTED`.
+
+| Variable | Purpose |
+|---|---|
+| `NEXT_PUBLIC_API_URL` | Backend base URL used by the Next.js rewrites |
+| `CORS_ALLOWED_ORIGINS` | Comma-separated browser origins allowed to call the API |
+| `CLIMATE_PROVIDER_TEMPERATURE_URL` | Optional validated temperature provider endpoint |
+| `CLIMATE_PROVIDER_LST_URL` | Optional validated land-surface-temperature provider |
+| `CLIMATE_PROVIDER_SST_URL` | Optional validated sea-surface-temperature provider |
+| `CLIMATE_PROVIDER_ANOMALIES_URL` | Optional validated anomaly provider |
+| `CLIMATE_PROVIDER_TIMEOUT_SECONDS` | Per-request provider timeout |
+| `ADMIN_API_KEY` | Operator key for administrative/write APIs; unset disables the boundary |
+| `RATE_LIMIT_PER_MINUTE` | Process-local per-client request limit |
+| `TRUST_PROXY_HEADERS` | Honour `X-Forwarded-For` only behind a trusted reverse proxy |
+| `ADMIN_BOUNDARY_CACHE_TTL` | Boundary cache lifetime in seconds |
+| `CLIMATE_CATALOG_ROOT` | Local STAC-compatible catalog index directory |
+
+Never commit real secrets. `.env` is not tracked.
+
+## Testing
+
+```bash
+# full backend suite (CI-equivalent)
+python -m compileall backend scripts
+python -m unittest discover -s backend/tests -p 'test_*.py' -v
+
+# frontend
+npm ci
+npm run lint
+npx tsc --noEmit
+npm run build
+```
+
+Tests cover the IMD rainfall contract, dataset lifecycle, provider adapters,
+catalog registration/search/lineage, rate limiting, the operator boundary,
+route-module integrity and the no-fabrication policy. Provider tests run against
+in-process HTTP fixtures, so CI never depends on an external climate provider.
+
+## Database
+
+PostGIS is optional. The application degrades gracefully: without
+`DATABASE_URL`, asset persistence returns **503** with an explicit
+"dataset, provider or model is unavailable" message instead of substituting an
+in-memory fake production store. Public read APIs remain fully available.
+Bring up the local stack with `cd infra && docker compose up -d`.
+
 ## Production roadmap
 
 ### Phase 1 — platform foundation

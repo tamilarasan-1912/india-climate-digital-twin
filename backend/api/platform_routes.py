@@ -1,6 +1,7 @@
 """Industry platform APIs: assets, exposure, risk, heat, scenarios, datasets and alerts."""
 from __future__ import annotations
 
+import os
 from datetime import datetime, timezone
 from typing import Any
 
@@ -9,14 +10,22 @@ from fastapi import APIRouter, HTTPException, Depends, Request
 from backend.models.domain_models import Asset, Exposure
 from backend.services.alert_service import build_alert, get_language_catalog
 from backend.services.asset_repository import get_asset, upsert_asset
+from backend.services.auth_service import operator_auth_status, require_operator
 from backend.services.dataset_catalog import get_catalog_contract
+from backend.services.dataset_catalog_store import (
+    catalog_summary,
+    delete_dataset,
+    get_dataset,
+    register_connected_datasets,
+    register_dataset,
+    search_datasets,
+)
 from backend.services.exposure_engine import assess_exposure
 from backend.services.flood_twin_service import get_flood_twin_status
 from backend.services.heat_risk_engine import assess_heat_risk
 from backend.services.risk_contract import get_risk_contract
 from backend.services.risk_engine import assess_asset
 from backend.services.scenario_engine import build_scenario
-from backend.services.auth_service import require_operator
 from backend.services.multilingual_alert_service import render_alert
 
 router = APIRouter(prefix="/api/v1", tags=["industry-platform"])
@@ -44,6 +53,67 @@ def capabilities() -> dict[str, Any]:
 @router.get("/catalog/contract")
 def catalog_contract() -> dict[str, Any]:
     return get_catalog_contract()
+
+
+@router.get("/catalog/summary")
+def dataset_catalog_summary() -> dict[str, Any]:
+    return catalog_summary()
+
+
+@router.get("/catalog/datasets")
+def dataset_catalog_search(
+    provider: str | None = None,
+    variable: str | None = None,
+    text: str | None = None,
+    validation_status: str | None = None,
+    limit: int | None = None,
+) -> dict[str, Any]:
+    results = search_datasets(
+        provider=provider,
+        variable=variable,
+        text=text,
+        validation_status=validation_status,
+        limit=limit,
+    )
+    return {"count": len(results), "datasets": results, **catalog_summary()}
+
+
+@router.get("/catalog/datasets/{dataset_id}")
+def dataset_catalog_read(dataset_id: str) -> dict[str, Any]:
+    record = get_dataset(dataset_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+    return record
+
+
+@router.post("/catalog/datasets")
+def dataset_catalog_register(record: dict[str, Any], request: Request) -> dict[str, Any]:
+    require_operator(request)
+    return register_dataset(record)
+
+
+@router.delete("/catalog/datasets/{dataset_id}")
+def dataset_catalog_delete(dataset_id: str, request: Request) -> dict[str, Any]:
+    require_operator(request)
+    if not delete_dataset(dataset_id):
+        raise HTTPException(status_code=404, detail="Dataset not found")
+    return {"status": "deleted", "dataset_id": dataset_id}
+
+
+@router.post("/catalog/register-connected")
+def dataset_catalog_register_connected(request: Request) -> dict[str, Any]:
+    require_operator(request)
+    return register_connected_datasets()
+
+
+@router.get("/security/status")
+def security_status() -> dict[str, Any]:
+    return {
+        "cors_allowed_origins": [o.strip() for o in os.getenv("CORS_ALLOWED_ORIGINS", "").split(",") if o.strip()],
+        "rate_limit_per_minute": int(os.getenv("RATE_LIMIT_PER_MINUTE", "240")),
+        "trust_proxy_headers": os.getenv("TRUST_PROXY_HEADERS", "false"),
+        **operator_auth_status(),
+    }
 
 
 @router.get("/flood/status")
