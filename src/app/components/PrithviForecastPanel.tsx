@@ -32,7 +32,9 @@ export default function PrithviForecastPanel() {
   }, []);
 
   useEffect(() => {
-    void loadStatus();
+    // Defer so the effect body does not call setState synchronously, which
+    // would trigger a cascading render.
+    void Promise.resolve().then(loadStatus);
   }, [loadStatus]);
 
   const runForecast = async () => {
