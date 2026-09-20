@@ -20,6 +20,7 @@ import numpy as np
 import xarray as xr
 from shapely import STRtree
 
+from backend.services.admin_names import normalise_admin_name
 from backend.services.administrative_boundary_service import list_district_geometries
 from backend.services.climate_risk_service import (
     calculate_risk_score,
@@ -27,18 +28,6 @@ from backend.services.climate_risk_service import (
     read_dataset,
 )
 
-
-def normalise_admin_name(value: Any) -> str:
-    """Fold an administrative name to comparable ASCII.
-
-    geoBoundaries ADM2 carries diacritics (e.g. "Tamil Nādu", "Mahārāshtra")
-    while the hierarchy uses plain ASCII, so both sides are normalised before
-    comparison.
-    """
-    decomposed = unicodedata.normalize("NFKD", str(value or ""))
-    ascii_text = "".join(ch for ch in decomposed if not unicodedata.combining(ch))
-    collapsed = re.sub(r"[^A-Za-z0-9]+", " ", ascii_text).strip().lower()
-    return re.sub(r"\s+", " ", collapsed)
 
 def _canonical_state_names() -> dict[str, str]:
     """Map a normalised state name to the hierarchy's canonical spelling.

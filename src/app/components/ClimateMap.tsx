@@ -11,22 +11,27 @@ type Props = {
   onStateSelect?: (name: string) => void;
   onCoords?: (lat: number, lon: number) => void;
   selectedState?: string;
+  districtMetrics?: Record<string, { valid_grid_cells?: number; mean_rainfall_mm?: number; maximum_rainfall_mm?: number; risk_category?: string }>;
   zoomRequest?: { type: "in" | "out" | "reset"; nonce: number };
 };
 
 const INDIA = "/data/india/india-states.geojson";
 const FIT: [[number, number], [number, number]] = [[68, 6], [97, 36]];
 
-export default function ClimateMap({ layers, date = "2024-07-15", onStateSelect, onCoords, zoomRequest, selectedState = "INDIA" }: Props) {
+export default function ClimateMap({ layers, date = "2024-07-15", onStateSelect, onCoords, zoomRequest, selectedState = "INDIA", districtMetrics }: Props) {
   const el = useRef<HTMLDivElement | null>(null);
   const map = useRef<Map | null>(null);
   const latestLayers = useRef(layers);
   const stateCb = useRef(onStateSelect);
   const coordCb = useRef(onCoords);
+  // The popup handler is bound once when the layer is created, so it reads the
+  // latest metrics from a ref rather than capturing props at bind time.
+  const metricsRef = useRef(districtMetrics);
 
   useEffect(() => { latestLayers.current = layers; }, [layers]);
   useEffect(() => { stateCb.current = onStateSelect; }, [onStateSelect]);
   useEffect(() => { coordCb.current = onCoords; }, [onCoords]);
+  useEffect(() => { metricsRef.current = districtMetrics; }, [districtMetrics]);
 
   useEffect(() => {
     if (!el.current || map.current) return;
@@ -209,7 +214,12 @@ export default function ClimateMap({ layers, date = "2024-07-15", onStateSelect,
           m.on("click", "india-district-fill", e => {
             const p = e.features?.[0]?.properties as Record<string, unknown> | undefined;
             const name = String(p?.shapeName ?? p?.NAME_2 ?? "District");
-            new Popup({ closeButton: true }).setLngLat(e.lngLat).setHTML(`<strong>${escapeHtml(name)}</strong><br/><small>DISTRICT GEOMETRY · CLIMATE METRICS PROVIDER REQUIRED</small>`).addTo(m);
+            const id = String(p?.shapeID ?? "");
+            const metric = metricsRef.current?.[id];
+            const html = metric?.valid_grid_cells
+              ? `<strong>${escapeHtml(name)}</strong><br/><small>OBSERVED · ${metric.valid_grid_cells} IMD GRID CELLS</small><br/>Mean ${escapeHtml(String(metric.mean_rainfall_mm))} mm · Max ${escapeHtml(String(metric.maximum_rainfall_mm))} mm<br/><small>Risk ${escapeHtml(String(metric.risk_category))}</small>`
+              : `<strong>${escapeHtml(name)}</strong><br/><small>DISTRICT GEOMETRY AVAILABLE</small><br/><small>NO IMD GRID-POINT CENTRE IN POLYGON · NO ESTIMATE</small>`;
+            new Popup({ closeButton: true }).setLngLat(e.lngLat).setHTML(html).addTo(m);
           });
         }
         if (m.getLayer("india-district-fill")) m.setLayoutProperty("india-district-fill", "visibility", "visible");

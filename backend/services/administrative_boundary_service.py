@@ -16,6 +16,8 @@ from urllib.request import Request, urlopen
 
 from shapely.geometry import shape
 
+from backend.services.admin_names import normalise_admin_name
+
 BASE = "https://www.geoboundaries.org/api/current/gbOpen/IND"
 CACHE_TTL = int(os.getenv("ADMIN_BOUNDARY_CACHE_TTL", "21600"))
 CACHE_DIR = Path(__file__).resolve().parents[2] / "backend" / "data" / "admin_cache"
@@ -81,10 +83,21 @@ def _joined_districts() -> tuple[dict[str, Any], ...]:
     for district in districts:
         try:
             geom = shape(district["geometry"])
-            point = geom.representative_point()
-            parent = next((name for name, state_geom in state_geoms if state_geom.contains(point)), "")
+            # Assign by largest shared area rather than by a single
+            # representative point: ADM1/ADM2 boundaries are digitised
+            # separately, so an island district such as Lakshadweep has a
+            # representative point that falls outside its own state polygon
+            # even though the two geometries clearly intersect.
+            best_name = ""
+            best_area = 0.0
+            for name, state_geom in state_geoms:
+                if not state_geom.intersects(geom):
+                    continue
+                area = state_geom.intersection(geom).area
+                if area > best_area:
+                    best_name, best_area = name, area
             props = dict(district.get("properties", {}))
-            props["parent_state"] = parent or None
+            props["parent_state"] = best_name or None
             props["administrative_level"] = "district"
             result.append({"type": "Feature", "geometry": district["geometry"], "properties": props})
         except Exception:
@@ -105,10 +118,45 @@ def get_admin_metadata() -> dict[str, Any]:
     }
 
 
+def _parent_state(properties: dict[str, Any]) -> str:
+    """Return the district's parent state name, tolerating a missing join.
+
+    ``parent_state`` is ``None`` for the occasional district whose state polygon
+    could not be resolved (Lakshadweep in the current geoBoundaries release), so
+    callers must not assume a string.
+    """
+    value = properties.get("parent_state")
+    return str(value) if value else ""
+
+
+def _resolve_state_name(state_name: str) -> str:
+    """Accept either a state name or a hierarchy state ID (e.g. ``IN-TN``)."""
+    from backend.services.india_hierarchy_service import STATES_AND_UTS
+
+    target = state_name.strip().upper()
+    for item in STATES_AND_UTS:
+        if item["id"] == target:
+            return item["name"]
+    return state_name
+
+
+def _parent_state_matches(properties: dict[str, Any], state_name: str) -> bool:
+    """Compare parent state names after diacritic folding.
+
+    geoBoundaries spells some states with diacritics ("Tamil Nādu",
+    "Mahārāshtra"), so a raw case-folded comparison drops every district of
+    those states from the map.
+    """
+    parent = _parent_state(properties)
+    if not parent:
+        return False
+    return normalise_admin_name(parent) == normalise_admin_name(_resolve_state_name(state_name))
+
+
 def get_districts(state_name: str | None = None) -> dict[str, Any]:
     features = list(_joined_districts())
     if state_name:
-        filtered = [f for f in features if _state_match(f["properties"], state_name) or f["properties"].get("parent_state", "").casefold() == state_name.casefold()]
+        filtered = [f for f in features if _state_match(f["properties"], state_name) or _parent_state_matches(f["properties"], state_name)]
     else:
         filtered = features
     districts = []
@@ -155,7 +203,7 @@ def list_district_geometries() -> list[dict[str, Any]]:
 def get_district_geojson(state_name: str | None = None) -> dict[str, Any]:
     features = list(_joined_districts())
     if state_name:
-        features = [f for f in features if f["properties"].get("parent_state", "").casefold() == state_name.casefold()]
+        features = [f for f in features if _parent_state_matches(f["properties"], state_name)]
     return {
         "type": "FeatureCollection",
         "features": features,
