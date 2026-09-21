@@ -7,6 +7,7 @@ drill from India -> state -> district.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import time
 from functools import lru_cache
@@ -18,10 +19,11 @@ from shapely.geometry import shape
 
 from backend.services.admin_names import normalise_admin_name
 
+logger = logging.getLogger(__name__)
+
 BASE = "https://www.geoboundaries.org/api/current/gbOpen/IND"
 CACHE_TTL = int(os.getenv("ADMIN_BOUNDARY_CACHE_TTL", "21600"))
 CACHE_DIR = Path(__file__).resolve().parents[2] / "backend" / "data" / "admin_cache"
-CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def _fetch_json(url: str) -> dict[str, Any]:
@@ -31,20 +33,87 @@ def _fetch_json(url: str) -> dict[str, Any]:
 
 
 def _metadata(level: str) -> dict[str, Any]:
-    return _fetch_json(f"{BASE}/{level}/")
+    payload = _fetch_json(f"{BASE}/{level}/")
+    if not isinstance(payload, dict):
+        raise RuntimeError(
+            f"geoBoundaries metadata for {level} was not a JSON object"
+        )
+    return payload
 
 
-def _downloaded(level: str) -> dict[str, Any]:
-    path = CACHE_DIR / f"IND-{level}.geojson"
-    if path.exists() and time.time() - path.stat().st_mtime < CACHE_TTL:
-        return json.loads(path.read_text(encoding="utf-8"))
+def _cache_path(level: str) -> Path:
+    """Resolve the cache file for a level, creating the directory on demand.
+
+    The directory is not created at import time, so importing this module has
+    no filesystem side effects.
+    """
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    return CACHE_DIR / f"IND-{level}.geojson"
+
+
+def _read_cache(level: str) -> dict[str, Any] | None:
+    """Return the on-disk payload for a level, or None if unusable."""
+    path = _cache_path(level)
+    if not path.exists():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        logger.warning("discarding unreadable boundary cache for %s", level)
+        return None
+    if not isinstance(payload, dict) or not isinstance(payload.get("features"), list):
+        logger.warning("discarding malformed boundary cache for %s", level)
+        return None
+    return payload
+
+
+def _download(level: str) -> dict[str, Any]:
     metadata = _metadata(level)
     url = metadata.get("simplifiedGeometryGeoJSON") or metadata.get("gjDownloadURL")
     if not url:
         raise RuntimeError(f"geoBoundaries returned no GeoJSON URL for {level}")
-    data = _fetch_json(url)
-    path.write_text(json.dumps(data), encoding="utf-8")
-    return data
+    payload = _fetch_json(url)
+    if not isinstance(payload, dict) or not isinstance(payload.get("features"), list):
+        raise RuntimeError(
+            f"geoBoundaries geometry for {level} was not a FeatureCollection"
+        )
+    _cache_path(level).write_text(json.dumps(payload), encoding="utf-8")
+    return payload
+
+
+@lru_cache(maxsize=8)
+def _downloaded(level: str) -> dict[str, Any]:
+    """Return boundary geometry for a level, degrading gracefully when offline.
+
+    Resolution order:
+    1. A cache file within ``CACHE_TTL`` is trusted as-is.
+    2. Otherwise the provider is contacted and a good response is cached.
+    3. If the provider is unreachable but a cache file exists, the last
+       known-good geometry is used with a warning rather than failing.
+
+    Nothing is ever synthesised: every return value is geometry parsed from the
+    provider or from a file already on disk. When neither is available the
+    caller gets ``RuntimeError``, which the API maps to 503 "provider
+    unavailable" rather than a client error.
+    """
+    path = _cache_path(level)
+    if path.exists() and time.time() - path.stat().st_mtime < CACHE_TTL:
+        cached = _read_cache(level)
+        if cached is not None:
+            return cached
+
+    try:
+        return _download(level)
+    except (OSError, RuntimeError) as error:
+        stale = _read_cache(level)
+        if stale is not None:
+            logger.warning(
+                "geoBoundaries %s unavailable (%s); serving cached geometry", level, error
+            )
+            return stale
+        raise RuntimeError(
+            f"administrative boundary geometry for {level} is unavailable: {error}"
+        ) from error
 
 
 def _prop(properties: dict[str, Any], *names: str) -> str:

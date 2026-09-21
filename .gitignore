@@ -44,3 +44,6 @@ data/india/**/zarr/
 data/india/**/rasters/
 data/india/**/climate_raw/
 backend/data/**/raw/
+
+# Agent scratch dirs (planning artefacts, never part of the build)
+.agents_tmp/

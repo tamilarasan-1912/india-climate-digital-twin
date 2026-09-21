@@ -1,7 +1,23 @@
+import json
+import os
+import pathlib
+import tempfile
+import time
 import unittest
 from unittest.mock import patch
 
 from backend.services import administrative_boundary_service as svc
+
+
+def _feature(name: str) -> dict:
+    return {
+        "type": "Feature",
+        "properties": {"shapeName": name},
+        "geometry": {
+            "type": "Polygon",
+            "coordinates": [[[78, 10], [80, 10], [80, 12], [78, 12], [78, 10]]],
+        },
+    }
 
 
 class AdministrativeBoundaryTests(unittest.TestCase):
@@ -133,6 +149,136 @@ class AdminTwinAdapterTests(unittest.TestCase):
         self.assertEqual(result["status"], "available")
         self.assertEqual(result["state_variables"]["valid_grid_cells"], 2)
         self.assertIn("provenance", result)
+
+
+class BoundaryCacheResilienceTests(unittest.TestCase):
+    """The boundary data plane must degrade gracefully, not fail, when offline.
+
+    These reproduce the deployment conditions that previously broke district
+    drill-down: a fresh clone with no cache, and a cache older than the TTL.
+    """
+
+    def setUp(self):
+        self.tmp = pathlib.Path(tempfile.mkdtemp())
+        self.addCleanup(lambda: svc._downloaded.cache_clear())
+
+    def _write_cache(self, level: str, payload: dict) -> pathlib.Path:
+        path = self.tmp / f"IND-{level}.geojson"
+        path.write_text(json.dumps(payload), encoding="utf-8")
+        return path
+
+    def _age_past_ttl(self, *paths: pathlib.Path) -> None:
+        old = time.time() - (svc.CACHE_TTL + 60)
+        for path in paths:
+            os.utime(path, (old, old))
+
+    def _patched(self):
+        return patch.object(svc, "CACHE_DIR", self.tmp)
+
+    def test_cold_start_with_valid_cache_serves_it_without_network(self):
+        self._write_cache("ADM1", {"features": [_feature("Tamil Nadu")]})
+        self._write_cache("ADM2", {"features": []})
+        with self._patched(), patch.object(
+            svc, "_fetch_json", side_effect=AssertionError("network must not be used")
+        ):
+            svc._downloaded.cache_clear()
+            svc._joined_districts.cache_clear()
+            result = svc.get_districts("Tamil Nadu")
+        self.assertEqual(result["count"], 0)
+        self.assertEqual(result["provider"], "geoBoundaries")
+        svc._joined_districts.cache_clear()
+
+    def test_stale_cache_is_used_when_provider_is_unreachable(self):
+        adm1 = self._write_cache("ADM1", {"features": [_feature("Tamil Nadu")]})
+        adm2 = self._write_cache("ADM2", {"features": [_feature("Test District")]})
+        self._age_past_ttl(adm1, adm2)
+        with self._patched(), patch.object(
+            svc, "_fetch_json", side_effect=OSError("network down")
+        ):
+            svc._downloaded.cache_clear()
+            svc._joined_districts.cache_clear()
+            result = svc.get_districts("Tamil Nadu")
+        # Last known-good geometry is served rather than an error.
+        self.assertEqual(result["count"], 1)
+        self.assertEqual(result["districts"][0]["name"], "Test District")
+        svc._joined_districts.cache_clear()
+
+    def test_no_cache_and_no_network_raises_runtime_error_for_503(self):
+        with self._patched(), patch.object(
+            svc, "_fetch_json", side_effect=OSError("network down")
+        ):
+            svc._downloaded.cache_clear()
+            # RuntimeError is what the API maps to 503; OSError would not be.
+            with self.assertRaises(RuntimeError):
+                svc._downloaded("ADM1")
+
+    def test_urlerror_is_treated_as_provider_unavailable(self):
+        from urllib.error import URLError
+
+        with self._patched(), patch.object(
+            svc, "_fetch_json", side_effect=URLError("dns failure")
+        ):
+            svc._downloaded.cache_clear()
+            with self.assertRaises(RuntimeError):
+                svc._downloaded("ADM1")
+
+    def test_malformed_metadata_raises_runtime_error_not_an_input_error(self):
+        with self._patched(), patch.object(
+            svc, "_fetch_json", return_value=["not", "a", "mapping"]
+        ):
+            svc._downloaded.cache_clear()
+            with self.assertRaises(RuntimeError):
+                svc._downloaded("ADM1")
+
+    def test_metadata_without_download_url_raises_runtime_error(self):
+        with self._patched(), patch.object(svc, "_fetch_json", side_effect=[{}, {}]):
+            svc._downloaded.cache_clear()
+            with self.assertRaises(RuntimeError):
+                svc._downloaded("ADM1")
+
+    def test_non_feature_collection_geometry_is_rejected(self):
+        metadata = {"simplifiedGeometryGeoJSON": "https://example.invalid/x.geojson"}
+        with self._patched(), patch.object(
+            svc, "_fetch_json", side_effect=[metadata, {"unexpected": True}]
+        ):
+            svc._downloaded.cache_clear()
+            with self.assertRaises(RuntimeError):
+                svc._downloaded("ADM1")
+
+    def test_corrupt_cache_is_not_served_as_geometry(self):
+        self._write_cache("ADM1", {"features": [_feature("Tamil Nadu")]})
+        (self.tmp / "IND-ADM1.geojson").write_text("{not json", encoding="utf-8")
+        with self._patched(), patch.object(
+            svc, "_fetch_json", side_effect=OSError("network down")
+        ):
+            svc._downloaded.cache_clear()
+            # Unreadable cache must not silently become empty geometry.
+            with self.assertRaises(RuntimeError):
+                svc._downloaded("ADM1")
+
+    def test_repeated_calls_do_not_refetch(self):
+        calls = []
+
+        def fetch(url):
+            calls.append(url)
+            if url.endswith("/ADM1/"):
+                return {"simplifiedGeometryGeoJSON": "https://example.invalid/a1.geojson"}
+            return {"features": [_feature("Tamil Nadu")]}
+
+        with self._patched(), patch.object(svc, "_fetch_json", side_effect=fetch):
+            svc._downloaded.cache_clear()
+            svc._downloaded("ADM1")
+            svc._downloaded("ADM1")
+        self.assertEqual(len(calls), 2, "metadata + geometry fetched once, then memoized")
+
+    def test_importing_the_module_creates_no_directories(self):
+        """Directory creation moved into _cache_path, so import is inert."""
+        import importlib
+
+        created = []
+        with patch.object(pathlib.Path, "mkdir", lambda *a, **k: created.append(a)):
+            importlib.reload(svc)
+        self.assertEqual(created, [], "import must not create cache directories")
 
 
 if __name__ == "__main__":
