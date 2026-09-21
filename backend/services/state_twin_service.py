@@ -22,6 +22,7 @@ from backend.services.climate_risk_service import (
     classify_risk_score,
     read_dataset,
 )
+from backend.services.date_utils import is_iso_date
 from backend.services.india_hierarchy_service import STATES_AND_UTS
 
 
@@ -166,6 +167,7 @@ def _values_for_state(selected: xr.DataArray, state_id: str, latitudes: np.ndarr
 
 
 def _stats(values: np.ndarray) -> dict[str, Any]:
+    values = np.asarray(values, dtype=float)
     valid = values[np.isfinite(values)]
     if valid.size == 0:
         return {"valid_grid_cells": 0, "status": "no_grid_coverage", "mean_rainfall_mm": None, "median_rainfall_mm": None, "maximum_rainfall_mm": None, "mean_hazard_score": None, "maximum_hazard_score": None, "risk_category": "no_data"}
@@ -195,6 +197,26 @@ def _unavailable_state(status: str) -> dict[str, Any]:
     }
 
 
+def _select_daily_grid(dataset: xr.Dataset, date: str) -> xr.DataArray:
+    """Select the requested day, preserving absent dates as explicit no-data.
+
+    A malformed date is a client error (ValueError -> HTTP 400). A well-formed
+    date outside the dataset's coverage is a data availability fact, so it is
+    returned as an empty selection and surfaced as ``no_data`` rather than as a
+    bad request.
+    """
+    if not is_iso_date(date):
+        raise ValueError(f"'{date}' is not a valid ISO-8601 date (expected YYYY-MM-DD).")
+    time_name = "TIME" if "TIME" in dataset.coords else "time"
+    available_days = {str(value)[:10] for value in dataset[time_name].values}
+    if date[:10] not in available_days:
+        return xr.DataArray(
+            np.full(dataset["RAINFALL"].shape[1:], np.nan, dtype=float),
+            dims=dataset["RAINFALL"].dims[1:],
+        )
+    return dataset["RAINFALL"].sel({time_name: date[:10]})
+
+
 def _state_metrics(selected: xr.DataArray, state_id: str, latitudes: np.ndarray, longitudes: np.ndarray) -> dict[str, Any]:
     if state_id not in _load_boundaries():
         return _unavailable_state("boundary_unavailable")
@@ -207,11 +229,7 @@ def get_state_climate_metrics(date: str, state_id: str) -> dict[str, Any]:
         raise ValueError(f"Unknown India state or union territory: {state_id}")
     state_name = next(item["name"] for item in STATES_AND_UTS if item["id"] == normalized)
     with read_dataset() as dataset:
-        time_name = "TIME" if "TIME" in dataset.coords else "time"
-        try:
-            selected = dataset["RAINFALL"].sel({time_name: date})
-        except Exception as error:
-            raise ValueError(f"Invalid or unavailable date '{date}'") from error
+        selected = _select_daily_grid(dataset, date)
         latitudes, longitudes = _dataset_coordinates(dataset)
         current = _state_metrics(selected, normalized, latitudes, longitudes)
         boundary_available = normalized in _load_boundaries()
@@ -238,11 +256,7 @@ def get_state_climate_metrics(date: str, state_id: str) -> dict[str, Any]:
 
 def get_all_state_climate_metrics(date: str) -> dict[str, Any]:
     with read_dataset() as dataset:
-        time_name = "TIME" if "TIME" in dataset.coords else "time"
-        try:
-            selected = dataset["RAINFALL"].sel({time_name: date})
-        except Exception as error:
-            raise ValueError(f"Invalid or unavailable date '{date}'") from error
+        selected = _select_daily_grid(dataset, date)
         latitudes, longitudes = _dataset_coordinates(dataset)
         boundaries = _load_boundaries()
         states = []

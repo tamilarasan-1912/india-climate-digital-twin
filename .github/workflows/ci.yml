@@ -17,6 +17,26 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build
+      - run: npm run lint
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Validates both Dockerfiles build and that the API image actually serves
+      # the health endpoint, without depending on any external climate provider.
+      - run: docker build -t ict-api:ci -f backend/Dockerfile .
+      - run: docker build -t ict-web:ci --build-arg NEXT_PUBLIC_API_URL=http://api:8000 .
+      - name: API image serves /api/health
+        run: |
+          docker run -d --name ict-api-ci -p 8000:8000 ict-api:ci
+          for i in $(seq 1 30); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8000/api/health || true)
+            [ "$code" = "200" ] && break
+            sleep 2
+          done
+          curl -fsS http://127.0.0.1:8000/api/health
+          docker rm -f ict-api-ci
 
   backend:
     runs-on: ubuntu-latest
@@ -51,3 +71,6 @@ jobs:
               print('IMPORT PASS', mod)
           PY
       - run: python -m unittest discover -s backend/tests -p 'test_*.py' -v
+      # A number of test modules use pytest-style fixtures. `unittest discover`
+      # silently skips them, so both runners are required to get real coverage.
+      - run: python -m pytest backend/tests -q

@@ -262,6 +262,24 @@ python -m unittest discover -s backend/tests -p 'test_*.py' -v
 cd infra && docker compose up -d
 ```
 
+### Full stack in Docker
+
+`Dockerfile`, `backend/Dockerfile` and the root `docker-compose.yml` run the
+frontend and API together without installing Python or Node locally:
+
+```bash
+docker compose up --build
+# frontend -> http://localhost:3000
+# backend  -> http://localhost:8000/api/health
+```
+
+Large and licensed data (the IMD NetCDF file and administrative geometry) is
+mounted read-only rather than baked into the image, and the writable
+administrative-boundary cache is pointed at its own volume via
+`ADMIN_BOUNDARY_CACHE_DIR`. If the geoBoundaries upstream is unreachable, a
+populated cache is still served (see `docs/ADMINISTRATIVE_DATA_SOURCE.md`).
+This is a local development environment; production remains Vercel + Render.
+
 ## Production architecture
 
 - GitHub: source control and reproducible history

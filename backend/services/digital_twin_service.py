@@ -15,6 +15,7 @@ from typing import Any
 import numpy as np
 
 from backend.services.ai_forecast_service import get_ai_model_info
+from backend.services.date_utils import is_iso_date
 from backend.services.baseline_forecast_service import (
     WINDOW_SIZE,
     get_daily_series,
@@ -45,15 +46,30 @@ def _read_csv_rows(path: Path) -> list[dict[str, str]]:
         return list(csv.DictReader(handle))
 
 
+def _state_vector_columns(rows: list[dict[str, str]]) -> list[str]:
+    """Return the twin_state_* columns in numeric order.
+
+    The vector width is derived from the dataset rather than hard-coded, so the
+    endpoint cannot silently truncate or pad a state vector whose dimension
+    changed.
+    """
+    if not rows:
+        return []
+    columns = [key for key in rows[0].keys() if key and key.startswith("twin_state_")]
+    return sorted(columns, key=lambda key: int(key.rsplit("_", 1)[-1]))
+
+
 def get_twin_state_summary() -> dict[str, Any]:
     rows = _read_csv_rows(TWIN_STATE_CSV)
     fused = _read_csv_rows(FUSED_CSV)
-    state_columns = [key for key in rows[0].keys() if key.startswith("twin_state_")] if rows else []
+    state_columns = _state_vector_columns(rows)
+    dates = [row["date"] for row in rows if row.get("date")]
     return {
         "location": "Chennai",
         "state_dimension": len(state_columns),
         "observations": len(rows),
-        "dates": [row["date"] for row in rows if row.get("date")],
+        "dates": dates,
+        "coverage": {"start": dates[0], "end": dates[-1]} if dates else None,
         "state_source": "Prithvi-EO + ERA5 fused features",
         "fused_feature_dimension": max(0, len(fused[0]) - 5) if fused else 0,
         "status": "available" if rows else "unavailable",
@@ -62,20 +78,51 @@ def get_twin_state_summary() -> dict[str, Any]:
 
 
 def get_twin_state(date: str | None = None) -> dict[str, Any]:
+    """Return the deterministic climate-state vector for one date.
+
+    A date the platform has no observation for is a no-data condition, not a
+    caller mistake, so it is reported as ``status: NO_DATA`` with 200 rather
+    than as a 400 bad request. Only a structurally unusable date string is a
+    client error.
+    """
     rows = _read_csv_rows(TWIN_STATE_CSV)
     if not rows:
         raise FileNotFoundError("Twin-state CSV is not available.")
-    row = rows[-1] if date is None else next((item for item in rows if item.get("date") == date), None)
-    if row is None:
-        raise ValueError(f"Twin state date {date} is unavailable.")
-    vector = [float(row[f"twin_state_{i:03d}"]) for i in range(128)]
+
+    dates = [row["date"] for row in rows if row.get("date")]
+    coverage = {"start": dates[0], "end": dates[-1]} if dates else None
+
+    if date is None:
+        row = rows[-1]
+    else:
+        if not is_iso_date(date):
+            raise ValueError(f"'{date}' is not a valid ISO-8601 date (expected YYYY-MM-DD).")
+        row = next((item for item in rows if item.get("date") == date), None)
+        if row is None:
+            return {
+                "date": date,
+                "status": "NO_DATA",
+                "data_available": False,
+                "message": "No validated climate-state observation exists for this date.",
+                "coverage": coverage,
+                "location": {"name": "Chennai"},
+                "provider_required": False,
+                "provenance": ["Prithvi-EO", "ERA5"],
+            }
+
+    columns = _state_vector_columns(rows)
+    vector = [float(row[column]) for column in columns]
     return {
         "date": row["date"],
+        "status": "available",
+        "data_available": True,
         "location": {"name": "Chennai", "latitude": float(row["latitude"]), "longitude": float(row["longitude"])},
         "state_dimension": len(vector),
         "vector": vector,
+        "state_source": "Prithvi-EO + ERA5 fused features",
         "provenance": ["Prithvi-EO", "ERA5"],
         "uncertainty": "not calibrated",
+        "scientific_note": "Deterministic PCA/SVD projection of available fused observations; not a trained neural latent state.",
     }
 
 

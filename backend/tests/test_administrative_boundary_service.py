@@ -280,6 +280,21 @@ class BoundaryCacheResilienceTests(unittest.TestCase):
             importlib.reload(svc)
         self.assertEqual(created, [], "import must not create cache directories")
 
+    def test_cache_dir_is_overridable_for_read_only_data_trees(self):
+        """Containers mount source data read-only, so the cache dir must be configurable."""
+        import importlib
+
+        try:
+            with patch.dict(os.environ, {"ADMIN_BOUNDARY_CACHE_DIR": "/var/cache/twin-bounds"}):
+                importlib.reload(svc)
+            self.assertEqual(svc.CACHE_DIR, pathlib.Path("/var/cache/twin-bounds"))
+        finally:
+            # Restore the module state other tests rely on.
+            importlib.reload(svc)
+        self.assertEqual(
+            svc.CACHE_DIR, pathlib.Path(svc.__file__).resolve().parents[2] / "backend" / "data" / "admin_cache"
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

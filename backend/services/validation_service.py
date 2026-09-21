@@ -1,354 +1,166 @@
-"""
-India Climate Digital Twin
-Scientific Validation Service
+"""Scientific consistency validation for the rainfall hazard engine.
 
-Validates the rainfall-based climate risk engine against
-the scientific consistency conditions used by the project.
-"""
+The checks here verify internal consistency of the implemented rainfall
+components: category thresholds, score range, and the relationship between
+extreme-risk points and the extremely-heavy rainfall threshold. They are
+consistency checks, not accuracy validation against an independent reference.
 
+Results are returned as structured data so they can back an API endpoint and
+be asserted in tests; ``run_validation`` remains the human-readable CLI entry
+point.
+"""
 from __future__ import annotations
 
 from collections import Counter
+from typing import Any
 
 from backend.services.climate_risk_service import (
+    EXTREMELY_HEAVY_THRESHOLD_MM,
+    HEAVY_THRESHOLD_MM,
+    VERY_HEAVY_THRESHOLD_MM,
     get_climate_risk_grid,
 )
 
 VALIDATION_DATE = "2024-07-15"
 
-HEAVY_THRESHOLD = 64.5
-VERY_HEAVY_THRESHOLD = 115.6
-EXTREMELY_HEAVY_THRESHOLD = 204.5
+THRESHOLDS = (
+    ("extremely_heavy", EXTREMELY_HEAVY_THRESHOLD_MM),
+    ("very_heavy", VERY_HEAVY_THRESHOLD_MM),
+    ("heavy", HEAVY_THRESHOLD_MM),
+)
+
+REQUIRED_PROPERTIES = {
+    "date",
+    "rainfall_mm",
+    "hazard_score",
+    "risk_category",
+    "rainfall_category",
+}
 
 
-def run_validation() -> None:
+def _expected_category(rainfall_mm: float) -> str:
+    for name, threshold in THRESHOLDS:
+        if rainfall_mm >= threshold:
+            return name
+    return "no_event"
 
+
+def validate_risk_grid(date: str = VALIDATION_DATE) -> dict[str, Any]:
+    """Run every consistency check and return a structured report.
+
+    Each check is recorded with ``passed`` and, when it fails, the offending
+    detail. A failing check is reported rather than raised so the endpoint
+    returns a complete picture instead of only the first problem.
+    """
+    result = get_climate_risk_grid(date)
+    features = result.get("features", [])
+    checks: list[dict[str, Any]] = []
+
+    def record(name: str, passed: bool, detail: str = "") -> None:
+        checks.append({"check": name, "passed": bool(passed), "detail": detail})
+
+    record("grid_has_features", len(features) > 0, f"feature_count={len(features)}")
+    if not features:
+        return _report(date, checks, None)
+
+    properties = [feature.get("properties", {}) for feature in features]
+
+    missing = sorted({key for props in properties for key in REQUIRED_PROPERTIES - set(props)})
+    record("required_properties_present", not missing, f"missing={missing}")
+
+    rainfall_values = [float(props["rainfall_mm"]) for props in properties]
+    scores = [float(props["hazard_score"]) for props in properties]
+    categories = Counter(props["risk_category"] for props in properties)
+
+    maximum_rainfall = max(rainfall_values)
+    maximum_index = rainfall_values.index(maximum_rainfall)
+    maximum_properties = properties[maximum_index]
+    maximum_geometry = features[maximum_index].get("geometry", {}).get("coordinates", [None, None])
+
+    record(
+        "risk_categories_account_for_all_features",
+        sum(categories.values()) == len(features),
+        f"categorised={sum(categories.values())} features={len(features)}",
+    )
+    record(
+        "hazard_score_within_range",
+        all(0.0 <= score <= 100.0 for score in scores),
+        f"score_range=({min(scores):.2f},{max(scores):.2f})",
+    )
+
+    mismatches = [
+        {"rainfall_mm": rainfall, "expected": _expected_category(rainfall), "actual": props["rainfall_category"]}
+        for rainfall, props in zip(rainfall_values, properties)
+        if props["rainfall_category"] != _expected_category(rainfall)
+    ]
+    record(
+        "rainfall_categories_match_imd_thresholds",
+        not mismatches,
+        f"mismatch_count={len(mismatches)} first={mismatches[0] if mismatches else None}",
+    )
+
+    extreme_properties = [props for props in properties if props["risk_category"] == "extreme"]
+    extreme_violations = [
+        props["rainfall_mm"]
+        for props in extreme_properties
+        if float(props["rainfall_mm"]) < EXTREMELY_HEAVY_THRESHOLD_MM
+    ]
+    record(
+        "extreme_risk_points_meet_extremely_heavy_threshold",
+        not extreme_violations,
+        f"violations={extreme_violations[:5]}",
+    )
+
+    record(
+        "maximum_rainfall_point_is_extreme_risk",
+        maximum_properties["risk_category"] == "extreme"
+        and maximum_rainfall >= EXTREMELY_HEAVY_THRESHOLD_MM,
+        f"maximum_rainfall_mm={maximum_rainfall:.2f} category={maximum_properties['risk_category']}",
+    )
+
+    summary = {
+        "valid_features": len(features),
+        "risk_distribution": dict(categories),
+        "maximum_rainfall_mm": maximum_rainfall,
+        "maximum_point": {
+            "longitude": maximum_geometry[0],
+            "latitude": maximum_geometry[1],
+            "hazard_score": maximum_properties.get("hazard_score"),
+            "risk_category": maximum_properties.get("risk_category"),
+            "rainfall_category": maximum_properties.get("rainfall_category"),
+        },
+    }
+    return _report(date, checks, summary)
+
+
+def _report(date, checks, summary) -> dict[str, Any]:
+    passed = sum(1 for check in checks if check["passed"])
+    return {
+        "date": date,
+        "validation_type": "internal_consistency",
+        "scope": "rainfall hazard engine over the IMD 0.25-degree grid",
+        "status": "passed" if checks and passed == len(checks) else "failed",
+        "checks_passed": passed,
+        "checks_total": len(checks),
+        "checks": checks,
+        "summary": summary,
+        "limitations": [
+            "Consistency validation only; no independent observational reference is used.",
+            "Risk engine has not been calibrated against an operational flood or heat-health model.",
+        ],
+    }
+
+
+def run_validation() -> dict[str, Any]:
+    report = validate_risk_grid()
     print("=" * 70)
     print("INDIA CLIMATE DIGITAL TWIN")
     print("SCIENTIFIC VALIDATION")
     print("=" * 70)
-
-    print()
-    print(f"Date: {VALIDATION_DATE}")
-
-    # ---------------------------------------------------------
-    # LOAD RISK GRID
-    # ---------------------------------------------------------
-
-    result = get_climate_risk_grid(
-        VALIDATION_DATE
-    )
-
-    features = result["features"]
-
-    print()
-    print("-" * 70)
-    print("GRID VALIDATION")
-    print("-" * 70)
-
-    print(
-        f"Valid features: {len(features)}"
-    )
-
-    assert len(features) > 0, (
-        "Risk grid contains no valid features."
-    )
-
-    # ---------------------------------------------------------
-    # RISK DISTRIBUTION
-    # ---------------------------------------------------------
-
-    categories = Counter(
-        feature["properties"]["risk_category"]
-        for feature in features
-    )
-
-    print()
-    print("-" * 70)
-    print("RISK DISTRIBUTION")
-    print("-" * 70)
-
-    for category in (
-        "low",
-        "moderate",
-        "high",
-        "extreme",
-    ):
-
-        print(
-            f"{category.capitalize():10}: "
-            f"{categories.get(category, 0)}"
-        )
-
-    total_categories = sum(
-        categories.values()
-    )
-
-    assert total_categories == len(features), (
-        "Risk categories do not account for "
-        "all valid grid features."
-    )
-
-    print(
-        "Category total consistency: PASS"
-    )
-
-    # =========================================================
-    # REQUIRED PROPERTY VALIDATION
-    # =========================================================
-
-    print()
-    print("-" * 70)
-    print("PROPERTY VALIDATION")
-    print("-" * 70)
-
-    required_properties = {
-        "date",
-        "rainfall_mm",
-        "hazard_score",
-        "risk_category",
-        "rainfall_category",
-    }
-
-    for feature in features:
-
-        properties = feature["properties"]
-
-        missing = (
-            required_properties
-            - set(properties.keys())
-        )
-
-        assert not missing, (
-            f"Missing properties: {missing}"
-        )
-
-    print(
-        "Required properties: PASS"
-    )
-
-    # =========================================================
-    # RAINFALL VALIDATION
-    # =========================================================
-
-    rainfall_values = [
-        float(
-            feature["properties"]["rainfall_mm"]
-        )
-        for feature in features
-    ]
-
-    maximum_rainfall = max(
-        rainfall_values
-    )
-
-    maximum_feature = max(
-        features,
-        key=lambda feature:
-            float(
-                feature["properties"]
-                ["rainfall_mm"]
-            )
-    )
-
-    maximum_properties = (
-        maximum_feature["properties"]
-    )
-
-    print()
-    print("-" * 70)
-    print("MAXIMUM RAINFALL VALIDATION")
-    print("-" * 70)
-
-    print(
-        f"Maximum rainfall: "
-        f"{maximum_rainfall:.2f} mm"
-    )
-
-    coordinates = (
-        maximum_feature["geometry"]
-        ["coordinates"]
-    )
-
-    print(
-        f"Longitude: {coordinates[0]}"
-    )
-
-    print(
-        f"Latitude: {coordinates[1]}"
-    )
-
-    print(
-        f"Hazard score: "
-        f"{maximum_properties['hazard_score']}"
-    )
-
-    print(
-        f"Risk category: "
-        f"{maximum_properties['risk_category']}"
-    )
-
-    print(
-        f"Rainfall category: "
-        f"{maximum_properties['rainfall_category']}"
-    )
-
-    # =========================================================
-    # RAINFALL THRESHOLD VALIDATION
-    # =========================================================
-
-    print()
-    print("-" * 70)
-    print("THRESHOLD VALIDATION")
-    print("-" * 70)
-
-    for feature in features:
-
-        properties = feature["properties"]
-
-        rainfall = float(
-            properties["rainfall_mm"]
-        )
-
-        rainfall_category = (
-            properties["rainfall_category"]
-        )
-
-        if rainfall >= EXTREMELY_HEAVY_THRESHOLD:
-
-            assert rainfall_category == (
-                "extremely_heavy"
-            ), (
-                f"Expected extremely_heavy "
-                f"for {rainfall} mm, "
-                f"got {rainfall_category}"
-            )
-
-        elif rainfall >= VERY_HEAVY_THRESHOLD:
-
-            assert rainfall_category == (
-                "very_heavy"
-            ), (
-                f"Expected very_heavy "
-                f"for {rainfall} mm, "
-                f"got {rainfall_category}"
-            )
-
-        elif rainfall >= HEAVY_THRESHOLD:
-
-            assert rainfall_category == (
-                "heavy"
-            ), (
-                f"Expected heavy "
-                f"for {rainfall} mm, "
-                f"got {rainfall_category}"
-            )
-
-    print(
-        "IMD rainfall thresholds: PASS"
-    )
-
-    # ---------------------------------------------------------
-    # HAZARD SCORE VALIDATION
-    # ---------------------------------------------------------
-
-    print()
-    print("-" * 70)
-    print("HAZARD SCORE VALIDATION")
-    print("-" * 70)
-
-    for feature in features:
-
-        score = float(
-            feature["properties"]["hazard_score"]
-        )
-
-        assert 0 <= score <= 100, (
-            f"Invalid hazard score: {score}"
-        )
-
-    print(
-        "Score range 0-100: PASS"
-    )
-
-    # =========================================================
-    # EXTREME RISK VALIDATION
-    # =========================================================
-
-    extreme_features = [
-        feature
-        for feature in features
-        if feature["properties"]
-        ["risk_category"]
-        == "extreme"
-    ]
-
-    print()
-    print("-" * 70)
-    print("EXTREME RISK VALIDATION")
-    print("-" * 70)
-
-    print(
-        f"Extreme risk points: "
-        f"{len(extreme_features)}"
-    )
-
-    for feature in extreme_features:
-
-        rainfall = float(
-            feature["properties"]["rainfall_mm"]
-        )
-
-        assert rainfall >= (
-            EXTREMELY_HEAVY_THRESHOLD
-        ), (
-            "Extreme risk point does not "
-            "meet the extremely-heavy "
-            "rainfall threshold."
-        )
-
-    print(
-        "Extreme-risk threshold consistency: PASS"
-    )
-
-    # =========================================================
-    # MAXIMUM POINT CONSISTENCY
-    # =========================================================
-
-    print()
-    print("-" * 70)
-    print("MAXIMUM POINT CONSISTENCY")
-    print("-" * 70)
-
-    assert (
-        maximum_properties["risk_category"]
-        == "extreme"
-    ), (
-        "Maximum rainfall point is not "
-        "classified as extreme risk."
-    )
-
-    assert (
-        maximum_rainfall
-        >= EXTREMELY_HEAVY_THRESHOLD
-    ), (
-        "Maximum rainfall does not meet "
-        "the extremely-heavy threshold."
-    )
-
-    print(
-        "Maximum point risk consistency: PASS"
-    )
-
-    # ---------------------------------------------------------
-    # FINAL RESULT
-    # ---------------------------------------------------------
-
-    print()
-    print("=" * 70)
-    print("SCIENTIFIC VALIDATION COMPLETE")
-    print("ALL CHECKS PASSED")
-    print("=" * 70)
+    for check in report["checks"]:
+        print(f"[{'PASS' if check['passed'] else 'FAIL'}] {check['check']} :: {check['detail']}")
+    print(f"\nOverall: {report['status']} ({report['checks_passed']}/{report['checks_total']})")
+    return report
 
 
 if __name__ == "__main__":

@@ -28,11 +28,14 @@ from backend.services.india_hierarchy_service import get_india_hierarchy, resolv
 from backend.services.state_twin_service import get_all_state_climate_metrics, get_state_climate_metrics, get_state_twin, get_boundary_coverage
 from backend.services.prithvi_wxc_service import get_prithvi_wxc_status, validate_prithvi_inputs, run_local_inference
 from backend.services.climate_state_contract import get_climate_state_contract
-from backend.services.multi_variable_twin_service import get_active_variable_catalog
+from backend.services.multi_variable_twin_service import get_active_variable_catalog, get_variable_availability_report
+from backend.services.climate_state_service import build_climate_state
 from backend.services.merra2_tensor_service import inspect_input_file
 from backend.services.prithvi_preprocessing_service import inspect_preprocessing
 from backend.services.risk_contract import get_risk_contract
 from backend.api.forecast_state_routes import generate_prithvi_forecast
+from backend.services.forecast_service import get_grid_point_timeseries
+from backend.services.validation_service import validate_risk_grid
 from backend.api.platform_routes import router as platform_router
 from backend.api.ogc_routes import router as ogc_router
 from backend.api.data_routes import router as data_router
@@ -313,6 +316,11 @@ def climate_anomalies(date: str): return _call(get_provider_layer, "anomalies", 
 def twin_contract(): return get_climate_state_contract()
 @app.get("/api/twin/active-variables")
 def twin_active_variables(): return {"variables": get_active_variable_catalog()}
+@app.get("/api/twin/variables")
+def twin_variables(): return _call(get_variable_availability_report)
+@app.get("/api/twin/climate-state")
+def twin_climate_state(date: str | None = Query(default=None, min_length=10)):
+    return _call(build_climate_state, date)
 @app.get("/api/risk/contract")
 def risk_contract(): return get_risk_contract()
 
@@ -382,6 +390,17 @@ def rainfall_summary(date: str): return _call(get_india_daily_summary, date)
 def rainfall_grid(date: str): return _call(get_rainfall_grid, date)
 @app.get("/api/rainfall/grid-info/{date}")
 def rainfall_grid_info(date: str): return _call(get_rainfall_grid_info, date)
+@app.get("/api/rainfall/point")
+def rainfall_point_timeseries(
+    latitude: float = Query(..., ge=-90, le=90),
+    longitude: float = Query(..., ge=-180, le=180),
+):
+    """Observed daily rainfall series for the nearest IMD grid cell.
+
+    Returns an explicit `no_grid_coverage` status (HTTP 200) when the nearest
+    cell falls outside the IMD land mask, instead of an unexplained null series.
+    """
+    return _call(get_grid_point_timeseries, latitude, longitude)
 
 # -------------------- EXTREME EVENTS --------------------
 @app.get("/api/extreme-events/rainfall/{date}")
@@ -468,5 +487,9 @@ def scenario_simulate(base_date: str = Query(...), precipitation_delta_pct: floa
 # -------------------- VALIDATION / PROVENANCE --------------------
 @app.get("/api/validation")
 def validation(): return _call(get_validation_summary)
+@app.get("/api/validation/risk-consistency")
+def validation_risk_consistency(date: str = Query(default="2024-07-15", min_length=10)):
+    """Internal consistency checks for the rainfall hazard engine."""
+    return _call(validate_risk_grid, date)
 @app.get("/api/provenance")
 def provenance(): return _call(get_provenance)

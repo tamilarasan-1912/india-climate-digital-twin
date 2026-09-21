@@ -7,6 +7,7 @@ No synthetic values are generated.
 from __future__ import annotations
 import json, os
 from datetime import datetime, timezone
+from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError, URLError
 from typing import Any
@@ -20,7 +21,26 @@ ENV_BY_LAYER = {
     "anomalies": "CLIMATE_PROVIDER_ANOMALIES_URL",
 }
 
+
+def require_http_url(url: str, *, context: str) -> str:
+    """Reject any URL that is not plain http/https.
+
+    ``urlopen`` will happily open ``file://`` and other schemes, which would let
+    a misconfigured or hostile operator-set variable turn an outbound fetch into
+    a local-file read. Only http/https endpoints are permitted.
+    """
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        raise RuntimeError(
+            f"{context} must use an http or https URL (got scheme '{parsed.scheme or 'none'}')."
+        )
+    if not parsed.netloc:
+        raise RuntimeError(f"{context} is missing a host.")
+    return url
+
+
 def _load_url(url: str, date: str, timeout: float) -> Any:
+    require_http_url(url, context="CLIMATE_PROVIDER_*_URL")
     sep = "&" if "?" in url else "?"
     request_url = f"{url}{sep}date={date}"
     request = Request(request_url, headers={"Accept": "application/json"})

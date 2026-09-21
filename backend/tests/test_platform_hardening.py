@@ -41,6 +41,41 @@ class RainfallSummaryContractTests(unittest.TestCase):
         self.assertIn("grid_points", summary)
 
 
+class RiskConsistencyValidationTests(unittest.TestCase):
+    """The validation endpoint must report structured, truthful results."""
+
+    def test_validation_report_is_structured_and_passing(self):
+        from backend.services.validation_service import validate_risk_grid
+
+        report = validate_risk_grid()
+        self.assertEqual(report["status"], "passed")
+        self.assertEqual(report["checks_passed"], report["checks_total"])
+        self.assertGreater(report["checks_total"], 0)
+        for check in report["checks"]:
+            self.assertIn("check", check)
+            self.assertIsInstance(check["passed"], bool)
+
+    def test_validation_declares_its_limits(self):
+        from backend.services.validation_service import validate_risk_grid
+
+        report = validate_risk_grid()
+        self.assertEqual(report["validation_type"], "internal_consistency")
+        self.assertTrue(report["limitations"])
+
+    def test_unavailable_date_surfaces_as_an_error_not_a_pass(self):
+        from backend.services.validation_service import validate_risk_grid
+
+        with self.assertRaises(ValueError):
+            validate_risk_grid("1999-01-01")
+
+
+class ClimateStateDiscoveryTests(unittest.TestCase):
+    def test_imd_dataset_is_reachable_from_the_shared_data_roots(self):
+        from backend.services.climate_state_service import DATA_ROOTS
+
+        self.assertTrue(any(root.exists() for root in DATA_ROOTS), DATA_ROOTS)
+
+
 class DatasetLifecycleTests(unittest.TestCase):
     def test_repeated_and_concurrent_reads_share_the_cached_dataset(self):
         first = get_daily_statistics("2024-07-15")

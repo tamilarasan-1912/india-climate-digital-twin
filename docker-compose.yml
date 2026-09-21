@@ -1,0 +1,72 @@
+# Local full-stack environment for the India Climate Digital Twin.
+#
+#   docker compose up --build
+#   frontend  -> http://localhost:3000
+#   backend   -> http://localhost:8000/api/health
+#
+# No secrets are baked in. Copy .env.example to .env to set ADMIN_API_KEY,
+# CORS_ALLOWED_ORIGINS and the optional provider URLs; without it the stack runs
+# with public read APIs open and the operator boundary disabled.
+services:
+  api:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      # The browser reaches the API through the frontend origin, so only the
+      # frontend needs to be an allowed origin.
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:3000}
+      ADMIN_API_KEY: ${ADMIN_API_KEY:-}
+      RATE_LIMIT_PER_MINUTE: ${RATE_LIMIT_PER_MINUTE:-240}
+      CLIMATE_PROVIDER_TIMEOUT_SECONDS: ${CLIMATE_PROVIDER_TIMEOUT_SECONDS:-20}
+      ADMIN_BOUNDARY_CACHE_TTL: ${ADMIN_BOUNDARY_CACHE_TTL:-21600}
+      ADMIN_BOUNDARY_CACHE_DIR: /var/cache/ict-boundaries
+      CLIMATE_CATALOG_ROOT: ${CLIMATE_CATALOG_ROOT:-backend/data/catalog}
+      CLIMATE_PROVIDER_TEMPERATURE_URL: ${CLIMATE_PROVIDER_TEMPERATURE_URL:-}
+      CLIMATE_PROVIDER_LST_URL: ${CLIMATE_PROVIDER_LST_URL:-}
+      CLIMATE_PROVIDER_SST_URL: ${CLIMATE_PROVIDER_SST_URL:-}
+      CLIMATE_PROVIDER_ANOMALIES_URL: ${CLIMATE_PROVIDER_ANOMALIES_URL:-}
+    volumes:
+      # Datasets stay outside the image: large, licensed and refreshed on their
+      # own cadence. Mounted read-only so the API cannot mutate source data.
+      - ./backend/data:/app/backend/data:ro
+      - ./data:/app/data:ro
+      # State/district geometry the backend reads directly (read-only).
+      - ./public/data:/app/public/data:ro
+      # Administrative boundary cache is a writable runtime cache, deliberately
+      # kept outside the read-only source-data tree.
+      - boundary-cache:/var/cache/ict-boundaries
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/api/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        # Server-side rewrite target; the container network resolves `api`.
+        # Must be passed explicitly: next.config.ts falls back to the public
+        # Render deployment when unset, which would silently proxy local
+        # traffic to production.
+        NEXT_PUBLIC_API_URL: http://api:8000
+    ports:
+      - "3000:3000"
+    environment:
+      # Same-origin `/api/*` calls keep CORS tight; rewrites proxy to the API.
+      # next.config.ts reads this at runtime too, so it must resolve on the
+      # container network. No client component uses this value.
+      NEXT_PUBLIC_API_URL: http://api:8000
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  boundary-cache:

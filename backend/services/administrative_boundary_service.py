@@ -13,6 +13,7 @@ import time
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
 from shapely.geometry import shape
@@ -23,10 +24,21 @@ logger = logging.getLogger(__name__)
 
 BASE = "https://www.geoboundaries.org/api/current/gbOpen/IND"
 CACHE_TTL = int(os.getenv("ADMIN_BOUNDARY_CACHE_TTL", "21600"))
-CACHE_DIR = Path(__file__).resolve().parents[2] / "backend" / "data" / "admin_cache"
+# Overridable so container/read-only deployments can point the writable geometry
+# cache at a mount that is not part of the source-data tree.
+CACHE_DIR = Path(
+    os.getenv(
+        "ADMIN_BOUNDARY_CACHE_DIR",
+        Path(__file__).resolve().parents[2] / "backend" / "data" / "admin_cache",
+    )
+)
 
 
 def _fetch_json(url: str) -> dict[str, Any]:
+    # Only http/https is permitted: urlopen would otherwise honour file:// and
+    # similar schemes, turning an outbound fetch into a local-file read.
+    if urlparse(url).scheme not in ("http", "https"):
+        raise RuntimeError(f"Refusing to fetch non-http URL: {url}")
     request = Request(url, headers={"User-Agent": "India-Climate-Digital-Twin/1.0"})
     with urlopen(request, timeout=30) as response:
         return json.loads(response.read().decode("utf-8"))

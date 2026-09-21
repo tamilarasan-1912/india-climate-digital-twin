@@ -102,5 +102,58 @@ class TwinEngineTests(unittest.TestCase):
             twin_engine.build_what_if("2024-07-16", sea_level_rise_m=2.1)
 
 
+class TwinStateSemanticsTests(unittest.TestCase):
+    """An absent observation date is no-data, not a caller error."""
+
+    def test_unknown_date_reports_no_data_instead_of_raising(self):
+        from backend.services import digital_twin_service as svc
+
+        result = svc.get_twin_state("1999-01-01")
+        self.assertEqual(result["status"], "NO_DATA")
+        self.assertFalse(result["data_available"])
+        self.assertNotIn("vector", result)
+
+    def test_no_data_response_reports_real_coverage(self):
+        from backend.services import digital_twin_service as svc
+
+        result = svc.get_twin_state("1999-01-01")
+        self.assertIsNotNone(result["coverage"])
+        self.assertLessEqual(result["coverage"]["start"], result["coverage"]["end"])
+
+    def test_malformed_date_is_a_client_error(self):
+        from backend.services import digital_twin_service as svc
+
+        with self.assertRaises(ValueError):
+            svc.get_twin_state("not-a-date")
+
+    def test_actual_date_returns_a_vector_matching_the_csv_width(self):
+        from backend.services import digital_twin_service as svc
+
+        summary = svc.get_twin_state_summary()
+        if summary["status"] != "available":
+            self.skipTest("twin-state dataset not installed")
+        result = svc.get_twin_state(summary["dates"][-1])
+        self.assertEqual(result["status"], "available")
+        self.assertTrue(result["data_available"])
+        self.assertEqual(len(result["vector"]), summary["state_dimension"])
+        self.assertTrue(all(isinstance(value, float) for value in result["vector"]))
+
+    def test_vector_width_is_not_hard_coded(self):
+        """The width must follow the dataset, not a fixed 128 constant."""
+        from backend.services import digital_twin_service as svc
+
+        rows = [{"twin_state_000": "1", "twin_state_001": "2", "twin_state_002": "3"}]
+        self.assertEqual(len(svc._state_vector_columns(rows)), 3)
+
+    def test_state_columns_are_ordered_numerically_not_lexically(self):
+        from backend.services import digital_twin_service as svc
+
+        rows = [dict.fromkeys(["twin_state_010", "twin_state_002", "twin_state_100"], "0")]
+        self.assertEqual(
+            svc._state_vector_columns(rows),
+            ["twin_state_002", "twin_state_010", "twin_state_100"],
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

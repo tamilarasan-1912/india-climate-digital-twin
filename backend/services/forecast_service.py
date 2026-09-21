@@ -209,7 +209,14 @@ def get_india_daily_timeseries() -> list[dict]:
 def get_grid_point_timeseries(
     latitude: float,
     longitude: float,
-) -> list[dict]:
+) -> dict:
+    """Observed daily rainfall for the IMD grid cell nearest to a coordinate.
+
+    IMD RF25 only carries land cells, so a coastal coordinate can resolve to an
+    ocean cell that holds no values for any day. That is reported explicitly
+    rather than as a list of silent nulls, so callers can tell "this cell is
+    outside the IMD land mask" apart from "this day was dry".
+    """
 
     with load_forecast_dataset() as ds:
 
@@ -267,4 +274,37 @@ def get_grid_point_timeseries(
 
             })
 
-        return result
+        observed_days = sum(
+            1
+            for item in result
+            if item["rainfall_mm"] is not None
+        )
+
+        if observed_days:
+            status = "available"
+            unavailable_reason = None
+        else:
+            status = "no_grid_coverage"
+            unavailable_reason = (
+                "The nearest IMD grid cell is outside the IMD RF25 land mask "
+                "and contains no observations for any date. IMD publishes "
+                "land-only rainfall, so coastal coordinates can resolve to an "
+                "ocean cell."
+            )
+
+        return {
+            "status": status,
+            "data_available": bool(observed_days),
+            "requested_latitude": latitude,
+            "requested_longitude": longitude,
+            "source": "IMD RF25 (0.25-degree daily rainfall)",
+            "units": "mm",
+            "variable": "RAINFALL",
+            "observed_days": observed_days,
+            "coverage": {
+                "start": str(dates[0]),
+                "end": str(dates[-1]),
+            },
+            "unavailable_reason": unavailable_reason,
+            "series": result,
+        }

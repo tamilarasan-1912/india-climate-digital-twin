@@ -66,6 +66,56 @@ def build_state_envelope(
     }
 
 
+def _source_availability() -> dict[str, str]:
+    """Map each declared source to its live availability.
+
+    The variable catalog describes design intent. Whether a variable is
+    actually backed by connected data is a runtime fact, so it is resolved
+    here on every call instead of being asserted by the static catalog.
+    """
+    availability = {"IMD RF25": "available", "rainfall hazard engine": "available"}
+    try:
+        from backend.services.prithvi_wxc_service import get_prithvi_wxc_status
+
+        ready = bool(get_prithvi_wxc_status().get("inference_ready"))
+    except Exception:
+        ready = False
+    availability["NASA-IMPACT Prithvi-WxC rollout"] = "available" if ready else "blocked"
+    return availability
+
+
 def get_active_variable_catalog() -> list[dict[str, Any]]:
-    """Return only variables that are currently backed by connected data/models."""
-    return [dict(item) for item in VARIABLE_CATALOG if item["status"] == "active"]
+    """Return only variables currently backed by connected data or models.
+
+    A variable whose source is blocked at runtime is excluded, so the endpoint
+    cannot advertise atmospheric variables while the model that produces them
+    is unavailable.
+    """
+    availability = _source_availability()
+    active: list[dict[str, Any]] = []
+    for item in VARIABLE_CATALOG:
+        if item["status"] != "active":
+            continue
+        state = availability.get(item.get("source") or "", "provider_required")
+        if state != "available":
+            continue
+        active.append({**item, "availability": state})
+    return active
+
+
+def get_variable_availability_report() -> dict[str, Any]:
+    """Report every contract variable with its declared and runtime status."""
+    availability = _source_availability()
+    variables = []
+    for item in VARIABLE_CATALOG:
+        source = item.get("source")
+        runtime = availability.get(source or "", "provider_required") if source else "planned"
+        if item["status"] == "planned":
+            runtime = "planned"
+        variables.append({**item, "availability": runtime})
+    return {
+        "contract_version": CONTRACT_VERSION,
+        "available_variable_count": sum(1 for v in variables if v["availability"] == "available"),
+        "unavailable_variables": [v["id"] for v in variables if v["availability"] != "available"],
+        "variables": variables,
+    }

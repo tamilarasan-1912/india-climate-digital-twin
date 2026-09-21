@@ -33,9 +33,12 @@ INPUT_INTERVAL_HOURS = 6
 FORECAST_LEAD_HOURS = 6
 
 # Canonical Prithvi-WxC MERRA-2 contract.
+# Ordering and membership follow the official rollout configuration at
+# NASA-IMPACT/Prithvi-WxC (PrithviWxC/config_files/config.yaml):
+# 20 surface variables + 10 vertical variables x 14 levels = 160 channels.
 SURFACE_VARIABLES = (
     "EFLUX", "GWETROOT", "HFLUX", "LAI", "LWGAB", "LWGEM", "LWTUP",
-    "PRECTOT", "PS", "QV2M", "SLP", "SWGNT", "SWTNT", "T2M", "TQI",
+    "PS", "QV2M", "SLP", "SWGNT", "SWTNT", "T2M", "TQI",
     "TQL", "TQV", "TS", "U10M", "V10M", "Z0M",
 )
 
@@ -56,7 +59,7 @@ UNITS = {
     "QV2M": "kg/kg", "SLP": "Pa", "SWGNT": "W/m²", "SWTNT": "W/m²",
     "T2M": "K", "TQI": "kg/m²", "TQL": "kg/m²", "TQV": "kg/m²",
     "TS": "K", "U10M": "m/s", "V10M": "m/s", "Z0M": "m",
-    "CLOUD": "", "H": "m", "OMEGA": "Pa/s", "PL": "Pa", "PRECTOT": "kg / (m² s)",
+    "CLOUD": "", "H": "m", "OMEGA": "Pa/s", "PL": "Pa",
     "QI": "kg/kg", "QL": "kg/kg", "QV": "kg/kg", "T": "K", "U": "m/s", "V": "m/s",
     "FRACI": "", "FRLAND": "", "FROCEAN": "", "PHIS": "m",
 }

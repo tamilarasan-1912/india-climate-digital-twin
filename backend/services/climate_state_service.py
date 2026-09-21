@@ -16,7 +16,11 @@ import numpy as np
 import xarray as xr
 
 ROOT = Path(__file__).resolve().parents[2]
-DATA_ROOT = ROOT / "backend" / "data" / "climate"
+# Validated datasets live in more than one documented location: provider
+# ingestion lands under backend/data, while curated national extracts live
+# under data/. Scanning both keeps the twin from reporting an operational
+# variable as missing just because it was ingested elsewhere.
+DATA_ROOTS = (ROOT / "backend" / "data", ROOT / "data")
 
 VARIABLES: dict[str, dict[str, Any]] = {
     "rainfall": {"aliases": ["RAINFALL", "rainfall", "pr", "precipitation"], "unit": "mm", "role": "observed"},
@@ -27,7 +31,18 @@ VARIABLES: dict[str, dict[str, Any]] = {
 
 
 def _find_files() -> list[Path]:
-    return sorted(DATA_ROOT.rglob("*.nc")) if DATA_ROOT.exists() else []
+    """Return every discoverable NetCDF file under the documented data roots.
+
+    Directories that hold unrelated experiment archives (for example the
+    Chennai ERA5/Prithvi scratch data) are still included only when their
+    variables match a declared alias, so scanning broadly cannot invent a
+    variable that a dataset does not actually carry.
+    """
+    found: list[Path] = []
+    for root in DATA_ROOTS:
+        if root.exists():
+            found.extend(root.rglob("*.nc"))
+    return sorted(set(found))
 
 
 def _match_variable(ds: xr.Dataset, aliases: list[str]) -> str | None:
@@ -76,7 +91,8 @@ def discover_variable(variable: str) -> dict[str, Any]:
                     matches.append({"file": str(path.relative_to(ROOT)), "variable": name, "time_coordinate": _time_name(ds)})
         except Exception as exc:
             matches.append({"file": str(path.relative_to(ROOT)), "valid": False, "error": str(exc)})
-    return {"variable": variable, "matches": matches, "status": "available" if matches else "no_data"}
+    usable = any("variable" in match for match in matches)
+    return {"variable": variable, "matches": matches, "status": "available" if usable else "no_data"}
 
 
 def _read_variable(variable: str, target_date: str | None = None) -> dict[str, Any]:
@@ -90,11 +106,26 @@ def _read_variable(variable: str, target_date: str | None = None) -> dict[str, A
                 name = item["variable"]
                 da = ds[name]
                 tname = item.get("time_coordinate")
-                if target_date and tname:
-                    try:
-                        da = da.sel({tname: target_date}, method="nearest")
-                    except Exception:
-                        pass
+                if target_date and tname and tname in da.coords:
+                    # Exact match only. A "nearest" fallback would silently
+                    # return a different day's value labelled with the
+                    # requested date, which is exactly the fabrication the
+                    # platform forbids.
+                    available_days = {str(value)[:10] for value in da[tname].values}
+                    if target_date[:10] not in available_days:
+                        return {
+                            "status": "no_data",
+                            "variable": variable,
+                            "unit": VARIABLES[variable]["unit"],
+                            "source": item["file"],
+                            "quality_flag": "date_not_in_dataset",
+                            "requested_date": target_date,
+                            "coverage": {
+                                "start": min(available_days) if available_days else None,
+                                "end": max(available_days) if available_days else None,
+                            },
+                        }
+                    da = da.sel({tname: target_date[:10]})
                 values = np.asarray(da.values, dtype=float)
                 return {
                     "status": "available",
@@ -103,7 +134,7 @@ def _read_variable(variable: str, target_date: str | None = None) -> dict[str, A
                     "source_variable": name,
                     "unit": VARIABLES[variable]["unit"],
                     "statistics": _stats(values),
-                    "observation_time": str(da[tname].values) if tname and tname in da.coords else target_date,
+                    "observation_time": str(da[tname].values)[:10] if tname and tname in da.coords else target_date,
                     "quality_flag": "dataset_present",
                 }
         except Exception as exc:

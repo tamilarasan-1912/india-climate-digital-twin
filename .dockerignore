@@ -1,0 +1,20 @@
+# Keep build contexts small and avoid leaking local state into images.
+.git
+.github
+.next
+node_modules
+.venv
+venv
+__pycache__
+*.pyc
+.pytest_cache
+.env
+.env.*
+!.env.example
+backend/data/admin_cache
+backend/data/catalog
+.agents_tmp
+AGENTS.md
+CLAUDE.md
+docs
+*.log
