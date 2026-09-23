@@ -6,6 +6,7 @@ when its required variables are actually supplied.
 """
 from __future__ import annotations
 
+import math
 from typing import Any
 
 
@@ -17,8 +18,16 @@ def _category(score: float) -> str:
 
 
 def _norm(value: float | None, low: float, high: float) -> float | None:
-    if value is None: return None
-    return max(0.0, min(1.0, (value - low) / (high - low)))
+    """Normalize a finite value; treat null and non-finite inputs as unavailable."""
+    if value is None:
+        return None
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(numeric):
+        return None
+    return max(0.0, min(1.0, (numeric - low) / (high - low)))
 
 
 def calculate_hazards(state: dict[str, Any]) -> dict[str, Any]:
@@ -29,29 +38,31 @@ def calculate_hazards(state: dict[str, Any]) -> dict[str, Any]:
     humidity = vars.get("humidity", {}).get("statistics", {}).get("mean")
 
     hazards: dict[str, Any] = {}
-    if rain is not None:
-        score = _norm(float(rain), 20, 200)
-        hazards["extreme_rainfall"] = {"status": "available", "score": score, "category": _category(score), "drivers": ["rainfall"]}
-        hazards["rainfall_flood_screening"] = {"status": "available", "score": score, "category": _category(score), "drivers": ["rainfall"], "warning": "screening only; no runoff/inundation model"}
+    rain_score = _norm(rain, 20, 200)
+    if rain_score is not None:
+        hazards["extreme_rainfall"] = {"status": "available", "score": rain_score, "category": _category(rain_score), "drivers": ["rainfall"]}
+        hazards["rainfall_flood_screening"] = {"status": "available", "score": rain_score, "category": _category(rain_score), "drivers": ["rainfall"], "warning": "screening only; no runoff/inundation model"}
     else:
         hazards["extreme_rainfall"] = {"status": "no_data"}
         hazards["rainfall_flood_screening"] = {"status": "no_data"}
 
-    if temp is not None:
-        score = _norm(float(temp), 30, 48)
-        hazards["heat"] = {"status": "available", "score": score, "category": _category(score), "drivers": ["temperature"]}
+    temp_score = _norm(temp, 30, 48)
+    if temp_score is not None:
+        hazards["heat"] = {"status": "available", "score": temp_score, "category": _category(temp_score), "drivers": ["temperature"]}
     else:
         hazards["heat"] = {"status": "no_data"}
 
-    if wind is not None:
-        score = _norm(float(wind), 8, 35)
-        hazards["wind"] = {"status": "available", "score": score, "category": _category(score), "drivers": ["wind"]}
+    wind_score = _norm(wind, 8, 35)
+    if wind_score is not None:
+        hazards["wind"] = {"status": "available", "score": wind_score, "category": _category(wind_score), "drivers": ["wind"]}
     else:
         hazards["wind"] = {"status": "no_data"}
 
-    if humidity is not None and temp is not None:
+    temperature_heat_score = _norm(temp, 28, 45)
+    humidity_score = _norm(humidity, 50, 100)
+    if temperature_heat_score is not None and humidity_score is not None:
         # Screening indicator only; not a certified heat-index implementation.
-        score = max(0.0, min(1.0, ((_norm(float(temp), 28, 45) or 0) * 0.7) + ((_norm(float(humidity), 50, 100) or 0) * 0.3)))
+        score = max(0.0, min(1.0, (temperature_heat_score * 0.7) + (humidity_score * 0.3)))
         hazards["heat_stress_screening"] = {"status": "available", "score": score, "category": _category(score), "drivers": ["temperature", "humidity"], "warning": "screening indicator; not a clinical heat-index product"}
     else:
         hazards["heat_stress_screening"] = {"status": "no_data"}

@@ -280,7 +280,12 @@ def _summarise_events(date: str, question: str) -> dict[str, Any]:
         if heavy_mm is not None:
             states = get_all_state_climate_metrics(date)["states"]
             ranked = sorted(
-                (s for s in states if (s.get("maximum_rainfall_mm") or 0) >= heavy_mm),
+                (
+                    s
+                    for s in states
+                    if s.get("maximum_rainfall_mm") is not None
+                    and s["maximum_rainfall_mm"] >= heavy_mm
+                ),
                 key=lambda s: s["maximum_rainfall_mm"],
                 reverse=True,
             )
@@ -496,7 +501,11 @@ def answer_question(question: str, date: str, layer: str = "rainfall") -> dict[s
         # Do not fall through to a national/state aggregate for a question that
         # explicitly targets a district or location. Missing ADM2 geometry is a
         # scientific dependency, not permission to substitute a parent value.
-        if "district" in q or (" in " in q and "india" not in q):
+        if "district" in q or (
+            " in " in q
+            and "india" not in q
+            and not _states_mentioned(q)
+        ):
             return _boundary_provider_no_data(question, date)
         district_id = None
     if district_id and ("district" in q or district_id):

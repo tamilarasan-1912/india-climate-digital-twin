@@ -203,6 +203,16 @@ class BoundaryCacheResilienceTests(unittest.TestCase):
         self.assertEqual(result["districts"][0]["name"], "Test District")
         svc._joined_districts.cache_clear()
 
+    def test_status_reports_cache_without_triggering_network(self):
+        with self._patched():
+            empty = svc.get_boundary_cache_status()
+            self.assertEqual(empty["state"], "PROVIDER REQUIRED")
+            self._write_cache("ADM1", {"features": []})
+            self._write_cache("ADM2", {"features": []})
+            ready = svc.get_boundary_cache_status()
+            self.assertEqual(ready["state"], "AVAILABLE")
+            self.assertEqual(ready["cache_valid"], {"ADM1": True, "ADM2": True})
+
     def test_no_cache_and_no_network_raises_runtime_error_for_503(self):
         with self._patched(), patch.object(
             svc, "_fetch_json", side_effect=OSError("network down")
