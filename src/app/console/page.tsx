@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import ClimateMap from "../components/ClimateMap";
 import GodsEyeOperations from "../components/GodsEyeOperations";
 
@@ -43,18 +43,23 @@ export default function ConsolePage() {
   const [assistantAnswer, setAssistantAnswer] = useState<any>(null);
   const [assistantBusy, setAssistantBusy] = useState(false);
   const [assistantLayer, setAssistantLayer] = useState("rainfall");
+  const refreshRequest = useRef(0);
+  const [mapLayerStatus, setMapLayerStatus] = useState<Record<string, any>>({});
 
   const apiFetch = useCallback(async (key: string, url: string) => { try { const r = await fetch(url, { cache: "no-store" }); return [key, r.ok ? await r.json() : null] as const; } catch { return [key, null] as const; } }, []);
   const refresh = useCallback(async () => {
+    const requestId = ++refreshRequest.current;
     setRefreshing(true); setLoading(true);
     const entries = await Promise.all([
-      apiFetch("health", "/api/health"), apiFetch("godsEye", `/api/gods-eye/state?date=${date}`), apiFetch("layerStatus", "/api/climate/layers"), apiFetch("rainfall", `/api/rainfall/summary/${date}`), apiFetch("risk", `/api/risk/summary/${date}`),
+      apiFetch("health", "/api/health"), apiFetch("godsEye", `/api/gods-eye/state?date=${date}`), apiFetch("layerStatus", "/api/climate/layers"), apiFetch("rainfall", `/api/rainfall/summary/${date}`), apiFetch("rainfallInfo", "/api/rainfall/info"), apiFetch("risk", `/api/risk/summary/${date}`),
       apiFetch("events", `/api/extreme-events/summary/${date}`), apiFetch("forecast", `/api/twin/next?date=${date}&horizon=${horizon}`), apiFetch("twin", `/api/twin/summary?date=${date}`),
       apiFetch("hierarchy", "/api/india/hierarchy"), apiFetch("variables", "/api/climate/variables"), apiFetch("models", "/api/models"), apiFetch("validation", "/api/validation"),
       apiFetch("provenance", "/api/provenance"), apiFetch("prithvi", "/api/ai/prithvi/status"), apiFetch("historical", `/api/historical/rainfall?start=${startDate}&end=${endDate}&limit=365`),
       apiFetch("system", "/api/system/status"), apiFetch("intelligence", "/api/climate/intelligence/capabilities"),
     ]);
-    setData(Object.fromEntries(entries)); setHistorical(Object.fromEntries(entries).historical); setClimateLayerStatus(Object.fromEntries(entries).layerStatus); setLoading(false); setRefreshing(false);
+    if (requestId !== refreshRequest.current) return;
+    const next = Object.fromEntries(entries);
+    setData(next); setHistorical(next.historical); setClimateLayerStatus(next.layerStatus); setLoading(false); setRefreshing(false);
   }, [apiFetch, date, endDate, horizon, startDate]);
   // The mount fetch is intentional: the loading indicator is part of the
   // initial render, not a cascading update from other state.
@@ -96,7 +101,49 @@ export default function ConsolePage() {
   const risk = data.risk; const rainfall = data.rainfall; const events = data.events; const twin = selectedId === "IN" ? data.twin : stateData; const forecast = data.forecast; const metrics = twin?.twin?.state_variables ?? twin?.state_variables ?? {};
   const districtMetricsById: Record<string, any> = {};
   for (const d of districtData?.districts ?? []) if (d?.district_id) districtMetricsById[d.district_id] = d;
-  const map = <div className="map-wrap"><GodsEyeOperations date={date} onDateChange={setDate}/><div className="godseye-hud"><span>GOD&#39;S-EYE / INDIA</span><b>CLIMATE INTELLIGENCE</b><small>{date} · PROVIDER-BACKED OBSERVATIONS</small></div><ClimateMap layers={layers} date={date} selectedState={selectedName} districtMetrics={districtMetricsById} onStateSelect={chooseState} onCoords={(lat, lon) => setCoords(`${lat.toFixed(4)}° N, ${lon.toFixed(4)}° E`)} zoomRequest={zoom}/><div className="map-actions"><button onClick={() => setZoom({ type: "in", nonce: Date.now() })}>+</button><button onClick={() => setZoom({ type: "out", nonce: Date.now() })}>−</button><button onClick={() => setZoom({ type: "reset", nonce: Date.now() })}>⌂</button></div><div className="map-date">OBSERVATION <b>{date}</b></div><div className="map-layers"><b>LAYERS</b>{(["rainfall", "temperature", "lst", "sst", "anomalies", "risk", "events"] as const).map(k => <button key={k} onClick={() => setLayers(x => ({ ...x, [k]: !x[k] }))}>{k === "lst" ? "LAND SURFACE TEMP" : k === "sst" ? "SEA SURFACE TEMP" : k.toUpperCase()}<span className={layers[k] ? "switch on" : "switch"}/></button>)}</div><div className="map-coords">{coords}</div></div>;
+  const layerDefinition = (key: string) => climateLayerStatus?.layers?.[key] ?? null;
+  const layerAvailable = (key: string) => {
+    const definition = layerDefinition(key);
+    const live = mapLayerStatus[key];
+    return (!definition || definition.status === "connected") && (!live || live.data_available);
+  };
+  const layerStatusLabel = (key: string) => {
+    const status = mapLayerStatus[key]?.status ?? layerDefinition(key)?.status;
+    if (!status) return "STATUS UNKNOWN";
+    return String(status).replaceAll("_", " ").toUpperCase();
+  };
+  const map = (
+    <div className="map-wrap">
+      <GodsEyeOperations date={date} onDateChange={setDate} />
+      <div className="godseye-hud"><span>GOD&#39;S-EYE / INDIA</span><b>CLIMATE INTELLIGENCE</b><small>{date} · PROVIDER-BACKED OBSERVATIONS</small></div>
+      <ClimateMap
+        layers={layers}
+        date={date}
+        selectedState={selectedName}
+        districtMetrics={districtMetricsById}
+        onStateSelect={chooseState}
+        onCoords={(lat, lon) => setCoords(`${lat.toFixed(4)}° N, ${lon.toFixed(4)}° E`)}
+        onLayerStatus={setMapLayerStatus}
+        zoomRequest={zoom}
+      />
+      <div className="map-actions"><button onClick={() => setZoom({ type: "in", nonce: Date.now() })}>+</button><button onClick={() => setZoom({ type: "out", nonce: Date.now() })}>−</button><button onClick={() => setZoom({ type: "reset", nonce: Date.now() })}>⌂</button></div>
+      <div className="map-date">OBSERVATION <b>{date}</b></div>
+      <div className="map-layers">
+        <b>LAYERS</b>
+        {(["rainfall", "temperature", "lst", "sst", "anomalies", "risk", "events"] as const).map(key => {
+          const available = layerAvailable(key);
+          const label = key === "lst" ? "LAND SURFACE TEMP" : key === "sst" ? "SEA SURFACE TEMP" : key.toUpperCase();
+          return <button key={key} type="button" disabled={!available} aria-pressed={layers[key]} title={available ? label : layerStatusLabel(key)} onClick={() => setLayers(current => ({ ...current, [key]: !current[key] }))}>
+            <span>{label}<small className="layer-status-label">{available ? (layers[key] ? "ON" : "OFF") : layerStatusLabel(key)}</small></span><span className={layers[key] && available ? "switch on" : "switch"}/>
+          </button>;
+        })}
+      </div>
+      <div className="map-coords">{coords}</div>
+    </div>
+  );
+
+  const observationStart = data.rainfallInfo?.time?.start ? String(data.rainfallInfo.time.start).slice(0, 10) : undefined;
+  const observationEnd = data.rainfallInfo?.time?.end ? String(data.rainfallInfo.time.end).slice(0, 10) : undefined;
 
   let body: ReactNode;
   if (nav === "Overview" || nav === "Digital Twin") body = <div className="dashboard"><div className="metrics"><Metric label="SELECTED ENTITY" value={selectedName}/><Metric label="TWIN STATUS" value={val(twin,["status"], data.health ? "CONNECTED" : null)}/><Metric label="OBSERVATION" value={date}/><Metric label="DATA SOURCE" value="IMD RF25"/></div>{map}<div className="bottom-grid"><Card title="WHAT NOW: CURRENT STATE"><div className="metric-grid"><Metric label="MEAN RAINFALL" value={val(rainfall,["rainfall","mean_mm"], val(metrics,["rainfall_mean_mm"]))} unit="mm"/><Metric label="MAX RAINFALL" value={val(rainfall,["rainfall","maximum_mm"], val(metrics,["rainfall_max_mm"]))} unit="mm"/><Metric label="MEAN HAZARD" value={val(risk,["statistics","mean_hazard_score"], val(metrics,["hazard_mean"]))}/><Metric label="MAX HAZARD" value={val(risk,["statistics","maximum_hazard_score"], val(metrics,["hazard_max"]))}/></div></Card><Card title="RISK DISTRIBUTION"><RiskBars risk={risk}/></Card></div></div>;
@@ -114,7 +161,7 @@ export default function ConsolePage() {
   else if (nav === "System") body = <SystemPanel data={data} refreshing={refreshing} onRefresh={refresh}/>;
   else body = <div className="single"><Card title="INDIA ADMINISTRATIVE HIERARCHY"><Hierarchy data={data.hierarchy} selected={selectedId} onSelect={id=>{setSelectedId(id); const s=data.hierarchy?.states_and_union_territories?.find((x:any)=>x.id===id); setSelectedName(s?.name?.toUpperCase() ?? "INDIA");}}/></Card></div>;
 
-  return <main className="app"><header className="topbar"><div className="brand"><span>🇮🇳</span><div><b>INDIA CLIMATE DIGITAL TWIN</b><small>NATIONAL CLIMATE INTELLIGENCE CORE</small></div></div><div className="sync"><span className="pulse"/> {refreshing ? "SYNCHRONIZING" : "SYSTEM ONLINE"}</div><div className="search"><input value={search} onChange={e=>setSearch(e.target.value)} onKeyDown={e=>e.key==='Enter'&&doSearch()} placeholder="Search India / state"/><button onClick={doSearch}>⌕</button></div><button className="icon" title="Synchronize" onClick={refresh}>↻</button><button className="icon" title="Notifications" onClick={()=>setModal("notifications")}>♢</button><button className="icon" title="System profile" onClick={()=>setModal("account")}>◯</button></header><div className="layout"><aside className="rail"><div className="rail-title">OPERATIONS</div>{NAV.map(([icon,label])=><button key={label} className={nav===label?"active":""} onClick={()=>setNav(label)}><span>{icon}</span>{label}</button>)}<div className="rail-bottom"><button onClick={exportJSON}>⇩ EXPORT STATE</button></div></aside><section className="content"><div className="page-head"><div><div className="crumb">INDIA / {selectedName}</div><h1>{nav === "What-If" ? "WHAT IF / SCENARIO LAB" : nav.toUpperCase()}</h1><p>India-scoped digital twin operations · observed state · forecast · risk intelligence</p></div><div className="head-actions"><label>DATE <input type="date" value={date} onChange={e=>setDate(e.target.value)}/></label><Status ok={!!data.health} text={data.health ? "API CONNECTED" : "API UNAVAILABLE"}/></div></div><div className="body">{loading && !data.health ? <div className="loading">LOADING INDIA CLIMATE STATE…</div> : body}</div></section></div>{modal&&<Modal type={modal} onClose={()=>setModal(null)} data={data} onExport={exportJSON}/>}</main>;
+  return <main className="app"><header className="topbar"><div className="brand"><span>🇮🇳</span><div><b>INDIA CLIMATE DIGITAL TWIN</b><small>NATIONAL CLIMATE INTELLIGENCE CORE</small></div></div><div className="sync"><span className="pulse"/> {refreshing ? "SYNCHRONIZING" : "SYSTEM ONLINE"}</div><div className="search"><input value={search} onChange={e=>setSearch(e.target.value)} onKeyDown={e=>e.key==='Enter'&&doSearch()} placeholder="Search India / state"/><button onClick={doSearch}>⌕</button></div><button className="icon" title="Synchronize" onClick={refresh}>↻</button><button className="icon" title="Notifications" onClick={()=>setModal("notifications")}>♢</button><button className="icon" title="System profile" onClick={()=>setModal("account")}>◯</button></header><div className="layout"><aside className="rail"><div className="rail-title">OPERATIONS</div>{NAV.map(([icon,label])=><button key={label} className={nav===label?"active":""} onClick={()=>setNav(label)}><span>{icon}</span>{label}</button>)}<div className="rail-bottom"><button onClick={exportJSON}>⇩ EXPORT STATE</button></div></aside><section className="content"><div className="page-head"><div><div className="crumb">INDIA / {selectedName}</div><h1>{nav === "What-If" ? "WHAT IF / SCENARIO LAB" : nav.toUpperCase()}</h1><p>India-scoped digital twin operations · observed state · forecast · risk intelligence</p></div><div className="head-actions"><label>DATE <input type="date" min={observationStart} max={observationEnd} value={date} onChange={e=>setDate(e.target.value)} title={observationStart && observationEnd ? `IMD coverage: ${observationStart} to ${observationEnd}` : "Dataset coverage unavailable"}/></label><Status ok={!!data.health} text={data.health ? "API CONNECTED" : "API UNAVAILABLE"}/></div></div><div className="body">{loading && !data.health ? <div className="loading">LOADING INDIA CLIMATE STATE…</div> : body}</div></section></div>{modal&&<Modal type={modal} onClose={()=>setModal(null)} data={data} onExport={exportJSON}/>}</main>;
 }
 
 function RiskBars({risk}:{risk:any}){const d=risk?.risk_distribution;if(!d)return <div className="empty">NO DATA</div>;const total: number = Number(Object.values(d).reduce((a:any,b:any)=>a+(Number(b)||0),0)) || 1;return <div className="bars">{(["low","moderate","high","extreme"] as const).map(k=><div className="bar" key={k}><span>{k.toUpperCase()}</span><div><i style={{width:`${(Number(d[k]||0)/total)*100}%`}}/></div><b>{d[k]??0}</b></div>)}</div>}

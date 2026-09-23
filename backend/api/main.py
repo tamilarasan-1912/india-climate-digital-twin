@@ -47,7 +47,12 @@ from backend.services.observability import configure_logging, new_request_id, re
 from backend.services.auth_service import require_operator
 from backend.services.rate_limiter import enforce_rate_limit
 from backend.services.gods_eye_service import build_gods_eye_state, get_gods_eye_layer
-from backend.services.administrative_boundary_service import get_admin_metadata, get_districts, get_district_geojson
+from backend.services.administrative_boundary_service import (
+    get_admin_metadata,
+    get_boundary_cache_status,
+    get_districts,
+    get_district_geojson,
+)
 from backend.services.district_climate_service import (
     get_all_district_climate_metrics,
     get_district_climate_metrics,
@@ -190,6 +195,7 @@ def system_status():
     health_state = get_system_health()
     providers = get_provider_registry()["providers"]
     layer_catalog = get_climate_layer_catalog()["layers"]
+    boundary_status = get_boundary_cache_status()
     try:
         prithvi = get_prithvi_wxc_status()
         prithvi_state = {
@@ -223,10 +229,21 @@ def system_status():
         "forecast": capability("AVAILABLE", model="7-day moving-average baseline", calibrated=False),
         "prithvi_wxc": capability("BLOCKED" if not prithvi_state["inference_ready"] else "CONNECTED", **prithvi_state),
         "validation": capability("VALIDATION REQUIRED", note="baseline rainfall forecast metrics available; no calibrated AI forecast metrics"),
-        "district_climate": capability("AVAILABLE", note="district rainfall aggregated from real IMD grid cells covered by geoBoundaries ADM2 polygons; districts without intersecting grid centres report no_grid_coverage"),
+        "district_climate": capability(
+            boundary_status["state"],
+            provider=boundary_status["provider"],
+            cache_present=boundary_status["cache_present"],
+            note=boundary_status["note"],
+        ),
         "flood_twin": capability("BLOCKED", note="no validated hydraulic model configured"),
         "ocean_and_land_layers": {
-            key: capability("PROVIDER REQUIRED" if layer_catalog[key]["status"] != "connected" else "CONNECTED")
+            key: capability(
+                "PROVIDER REQUIRED"
+                if not providers[key]["url_configured"]
+                else "CONFIGURED (VALIDATION PENDING)",
+                env_var=providers[key]["env_var"],
+                providers=layer_catalog[key]["providers"],
+            )
             for key in ("temperature", "lst", "sst", "anomalies")
         },
     }

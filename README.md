@@ -16,7 +16,7 @@ The twin is not a static map and not merely an AI model. Every operational resul
 - FastAPI + Xarray scientific backend
 - IMD rainfall NetCDF ingestion, statistics, grids and GeoJSON
 - State-level rainfall aggregation over real IMD grid cells covered by real state polygons
-- District-level rainfall aggregation over real IMD grid cells covered by real geoBoundaries ADM2 polygons
+- District-level rainfall aggregation over real IMD grid cells covered by real geoBoundaries ADM2 polygons when the validated ADM1/ADM2 cache is provisioned; otherwise the API returns explicit provider-required/NO_DATA status
 - Extreme rainfall classification and spatial event layers
 - Rainfall hazard-risk scoring and validation
 - Chennai Sentinel-2 historical archive and validated Prithvi-EO input pipeline
@@ -115,7 +115,7 @@ Completion model: `IMPLEMENTED` (code exists) → `CONNECTED` (real data flows)
 |---|---|---|---|---|
 | IMD rainfall | Yes | Yes | Yes | `RF25_ind2024_rfp25.nc`, 366 days, 129×135 grid |
 | State aggregation | Yes | Yes | Yes | 34/36 states; 2 island UTs have no grid centre |
-| District aggregation | Yes | Yes | Yes | 702/735 districts; 33 report `no_grid_coverage` |
+| District aggregation | Yes | Conditional | Conditional | Requires real geoBoundaries ADM1/ADM2 cache; absent cache remains `PROVIDER REQUIRED`/`NO_DATA` |
 | Rainfall risk | Yes | Yes | Yes | Rainfall-only hazard screening |
 | Extreme events | Yes | Yes | Yes | IMD-derived rainfall thresholds |
 | Forecasting | Yes | Yes | Partial | 7-day moving-average baseline; not AI-calibrated |
@@ -183,6 +183,7 @@ a provider `CONNECTED`.
 | `RATE_LIMIT_PER_MINUTE` | Process-local per-client request limit |
 | `TRUST_PROXY_HEADERS` | Honour `X-Forwarded-For` only behind a trusted reverse proxy |
 | `ADMIN_BOUNDARY_CACHE_TTL` | Boundary cache lifetime in seconds |
+| `ADMIN_BOUNDARY_CACHE_DIR` | Optional mounted directory containing validated `IND-ADM1.geojson` and `IND-ADM2.geojson` |
 | `CLIMATE_CATALOG_ROOT` | Local STAC-compatible catalog index directory |
 
 Never commit real secrets. `.env` is not tracked.

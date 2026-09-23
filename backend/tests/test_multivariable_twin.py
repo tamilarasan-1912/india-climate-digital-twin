@@ -17,3 +17,21 @@ def test_multihazard_does_not_invent_missing_temperature():
     result = calculate_hazards(state)
     assert result["hazards"]["extreme_rainfall"]["status"] == "available"
     assert result["hazards"]["heat"]["status"] == "no_data"
+
+
+def test_multihazard_treats_nonfinite_inputs_as_no_data():
+    state = {
+        "twin_state": {
+            "variables": {
+                "rainfall": {"statistics": {"mean": float("nan")}},
+                "temperature": {"statistics": {"mean": float("inf")}},
+            }
+        }
+    }
+
+    result = calculate_hazards(state)
+
+    assert result["status"] == "no_data"
+    assert result["overall_screening"] is None
+    assert result["hazards"]["extreme_rainfall"]["status"] == "no_data"
+    assert result["hazards"]["heat"]["status"] == "no_data"

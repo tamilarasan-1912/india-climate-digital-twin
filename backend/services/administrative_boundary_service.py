@@ -23,7 +23,11 @@ logger = logging.getLogger(__name__)
 
 BASE = "https://www.geoboundaries.org/api/current/gbOpen/IND"
 CACHE_TTL = int(os.getenv("ADMIN_BOUNDARY_CACHE_TTL", "21600"))
-CACHE_DIR = Path(__file__).resolve().parents[2] / "backend" / "data" / "admin_cache"
+DEFAULT_CACHE_DIR = Path(__file__).resolve().parents[2] / "backend" / "data" / "admin_cache"
+# Deployments may mount a validated cache outside the application image. The
+# default remains the repository runtime-cache location and is never populated
+# with synthetic geometry.
+CACHE_DIR = Path(os.getenv("ADMIN_BOUNDARY_CACHE_DIR") or DEFAULT_CACHE_DIR)
 
 
 def _fetch_json(url: str) -> dict[str, Any]:
@@ -67,7 +71,44 @@ def _read_cache(level: str) -> dict[str, Any] | None:
     return payload
 
 
+def get_boundary_cache_status() -> dict[str, Any]:
+    """Report local geometry availability without triggering provider I/O.
+
+    This is used by health/status endpoints, where a missing cache should be
+    reported quickly as a dependency gap rather than causing a 30-second
+    upstream request. The request path still lazily refreshes stale/missing
+    files through geoBoundaries.
+    """
+    present: dict[str, bool] = {}
+    valid: dict[str, bool] = {}
+    for level in ("ADM1", "ADM2"):
+        path = CACHE_DIR / f"IND-{level}.geojson"
+        present[level] = path.exists()
+        if not present[level]:
+            valid[level] = False
+            continue
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            valid[level] = isinstance(payload, dict) and isinstance(payload.get("features"), list)
+        except (OSError, ValueError):
+            valid[level] = False
+    available = all(valid.values())
+    return {
+        "state": "AVAILABLE" if available else "PROVIDER REQUIRED",
+        "cache_present": present,
+        "cache_valid": valid,
+        "provider": "geoBoundaries",
+        "levels": ["ADM1", "ADM2"],
+        "note": (
+            "Real cached ADM1/ADM2 geometry is available."
+            if available
+            else "Mount or fetch validated geoBoundaries ADM1/ADM2 geometry; no synthetic boundaries are used."
+        ),
+    }
+
+
 def _download(level: str) -> dict[str, Any]:
+
     metadata = _metadata(level)
     url = metadata.get("simplifiedGeometryGeoJSON") or metadata.get("gjDownloadURL")
     if not url:

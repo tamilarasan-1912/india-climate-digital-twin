@@ -5,7 +5,7 @@
 - Multi-variable climate-state assembler with explicit `available` / `no_data` states.
 - Transparent weighted observation/reanalysis assimilation primitive with source weights and spread-based uncertainty.
 - Multi-hazard screening for rainfall extremes, rainfall flood screening, heat, wind and heat-stress screening when required datasets exist.
-- District and city GeoJSON adapters that return `no_data` until validated administrative geometry is installed.
+- District and city GeoJSON adapters that return `no_data`/provider-required status until validated administrative geometry is installed.
 - FastAPI endpoints for the multi-variable state, variable discovery, multi-hazard state and district/city resources.
 - Automated tests for assimilation and the no-fabrication policy.
 
@@ -49,11 +49,15 @@ The multi-variable state assembler discovers supported variables by NetCDF varia
 
 District geometry:
 
-`public/data/india/india-districts.geojson`
+`backend/data/admin_cache/IND-ADM1.geojson` and `backend/data/admin_cache/IND-ADM2.geojson`
 
-City geometry:
+The cache is gitignored and must contain validated real geometry. `ADMIN_BOUNDARY_CACHE_DIR`
+can point to a mounted cache in deployment. A fresh checkout without the cache
+returns explicit provider-required/`NO_DATA` status; it does not treat the
+tracked state GeoJSON as district data.
 
-`public/data/india/india-cities.geojson`
+City geometry is not installed as a production source and remains unavailable
+until an independently validated city/urban boundary dataset is provisioned.
 
 ## Scientific boundary
 

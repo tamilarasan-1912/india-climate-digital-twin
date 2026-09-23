@@ -31,19 +31,21 @@ The repository should not invent a public download URL for a Survey of India pro
 ## Runtime geometry resolution
 
 The running application resolves the `India -> State -> District` spine from
-**geoBoundaries** (ADM1/ADM2, ODbL 1.0), which is the open source currently
-installed in the repository. Survey of India ABDB remains the intended
-authoritative replacement; the resolver below is unchanged when that swap
-happens.
+**geoBoundaries** (ADM1/ADM2, ODbL 1.0), provisioned as a validated runtime
+cache. The source is not bundled in this Git checkout because the cache is
+large and gitignored. Survey of India ABDB remains the intended authoritative
+replacement; the resolver can be swapped when that source is legally and
+technically provisioned.
 
 `backend/services/administrative_boundary_service.py` fetches geometry lazily
-and caches it in `backend/data/admin_cache/`. That directory is gitignored, so
-a fresh clone starts with no geometry on disk.
+and caches it in `backend/data/admin_cache/` by default. Deployments may set
+`ADMIN_BOUNDARY_CACHE_DIR` to a mounted directory containing the same filenames.
+The cache is gitignored, so a fresh clone starts with no geometry on disk.
 
 Resolution order for each administrative level:
 
 1. A cache file newer than `ADMIN_BOUNDARY_CACHE_TTL` (default 21600s) is used as-is.
-2. Otherwise the provider is contacted; a well-formed `FeatureCollection` is written to the cache.
+2. Otherwise the geoBoundaries provider is contacted; a well-formed `FeatureCollection` is written to the cache.
 3. If the provider is unreachable, times out, or returns malformed data, the last
    known-good cache file is served with a warning logged at WARNING level.
 4. If there is no usable cache either, the request fails with `RuntimeError`.
