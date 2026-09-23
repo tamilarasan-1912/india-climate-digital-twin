@@ -3,10 +3,11 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev -H 0.0.0.0 -p 3000",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "verify:dev-networking": "node scripts/verify-dev-networking.mjs"
   },
   "dependencies": {
     "@turf/boolean-point-in-polygon": "^7.4.0",
