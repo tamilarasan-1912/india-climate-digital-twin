@@ -25,6 +25,42 @@ def test_state_stats_accept_plain_lists():
     assert result["maximum_rainfall_mm"] == 3.0
 
 
+def test_state_metrics_expose_the_keys_the_console_reads():
+    """The console renders state metrics by these exact key names.
+
+    A rename here silently falls the state panel back to national values, which
+    is a data-integrity failure rather than a cosmetic one, so the contract is
+    pinned explicitly.
+    """
+    from backend.services.state_twin_service import get_state_climate_metrics
+
+    metrics = get_state_climate_metrics("2024-12-31", "IN-TN")["metrics"]
+
+    for key in (
+        "valid_grid_cells",
+        "mean_rainfall_mm",
+        "maximum_rainfall_mm",
+        "mean_hazard_score",
+        "maximum_hazard_score",
+    ):
+        assert key in metrics, f"console reads metrics.{key}"
+
+
+def test_state_twin_state_variables_match_climate_metrics():
+    """The twin and climate endpoints must agree for the same state and date."""
+    from backend.services.state_twin_service import (
+        get_state_climate_metrics,
+        get_state_twin,
+    )
+
+    date, state_id = "2024-12-31", "IN-TN"
+    climate = get_state_climate_metrics(date, state_id)
+    twin = get_state_twin(date, state_id)["twin"]["state_variables"]
+
+    assert twin["mean_rainfall_mm"] == climate["metrics"]["mean_rainfall_mm"]
+    assert twin["valid_grid_cells"] == climate["metrics"]["valid_grid_cells"]
+
+
 def test_state_metrics_distinguish_absent_from_malformed_dates():
     from backend.services.state_twin_service import get_state_climate_metrics
 

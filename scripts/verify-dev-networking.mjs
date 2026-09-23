@@ -18,7 +18,7 @@ const allowlist = [...resolveDevOrigins(), "localhost"];
 // [origin hostname, should be allowed, why]
 const CASES = [
   ["localhost", true, "loopback by name"],
-  ["127.0.0.1", false, "Next.js itself does not allowlist IPv4 loopback; browsers use 'localhost'"],
+  ["127.0.0.1", true, "IPv4 loopback; must be allowed or the dev client is blocked"],
   ["app.localhost", true, "**.localhost covers subdomains"],
   ["10.42.220.8", true, "private 10.0.0.0/8 LAN address"],
   ["192.168.1.50", true, "private 192.168.0.0/16 LAN address"],

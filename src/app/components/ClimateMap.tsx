@@ -1,12 +1,12 @@
 "use client";
 
-import { useEffect, useRef } from "react";
-import { Map, NavigationControl, Popup, type GeoJSONSourceSpecification } from "maplibre-gl";
+import { useEffect, useRef, useState } from "react";
+import { Map, NavigationControl, Popup, type LayerSpecification } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 
-type LayerKey = "rainfall" | "temperature" | "lst" | "sst" | "anomalies" | "risk" | "events";
+export type MapLayerKey = "rainfall" | "temperature" | "lst" | "sst" | "anomalies" | "risk" | "events";
 type Props = {
-  layers: Record<LayerKey, boolean>;
+  layers: Record<MapLayerKey, boolean>;
   date?: string;
   onStateSelect?: (name: string) => void;
   onCoords?: (lat: number, lon: number) => void;
@@ -17,6 +17,8 @@ type Props = {
 
 const INDIA = "/data/india/india-states.geojson";
 const FIT: [[number, number], [number, number]] = [[68, 6], [97, 36]];
+// Every layer key that is drawn as point geometry from /api/gods-eye/layer.
+const POINT_LAYERS: MapLayerKey[] = ["temperature", "lst", "sst", "anomalies", "risk", "events"];
 
 export default function ClimateMap({ layers, date = "2024-07-15", onStateSelect, onCoords, zoomRequest, selectedState = "INDIA", districtMetrics }: Props) {
   const el = useRef<HTMLDivElement | null>(null);
@@ -27,12 +29,21 @@ export default function ClimateMap({ layers, date = "2024-07-15", onStateSelect,
   // The popup handler is bound once when the layer is created, so it reads the
   // latest metrics from a ref rather than capturing props at bind time.
   const metricsRef = useRef(districtMetrics);
+  const latestDate = useRef(date);
+  // Bumped once the style has loaded. Data effects gate on it because sources
+  // cannot be added before the style exists.
+  const [styleReady, setStyleReady] = useState(0);
 
   useEffect(() => { latestLayers.current = layers; }, [layers]);
   useEffect(() => { stateCb.current = onStateSelect; }, [onStateSelect]);
   useEffect(() => { coordCb.current = onCoords; }, [onCoords]);
   useEffect(() => { metricsRef.current = districtMetrics; }, [districtMetrics]);
+  useEffect(() => { latestDate.current = date; }, [date]);
 
+  // The map is created exactly once. It used to depend on `date`, so every date
+  // change tore down the WebGL context, the DEM terrain source and every layer,
+  // then rebuilt them — which made timeline scrubbing unusable. Temporal updates
+  // now mutate existing sources instead.
   useEffect(() => {
     if (!el.current || map.current) return;
     const m = new Map({
@@ -85,11 +96,6 @@ export default function ClimateMap({ layers, date = "2024-07-15", onStateSelect,
           id: "states-outline", type: "line", source: "india-states",
           paint: { "line-color": "#b6c7cf", "line-width": 1.1, "line-opacity": 0.82 },
         });
-        m.addLayer({
-          id: "state-hover", type: "line", source: "india-states",
-          filter: ["==", ["id"], ""],
-          paint: { "line-color": "#7ddfff", "line-width": 2.5, "line-opacity": 0 },
-        });
 
         m.on("click", "states-fill", e => {
           const p = e.features?.[0]?.properties as Record<string, unknown> | undefined;
@@ -97,7 +103,7 @@ export default function ClimateMap({ layers, date = "2024-07-15", onStateSelect,
           stateCb.current?.(name);
           new Popup({ closeButton: true, closeOnClick: true })
             .setLngLat(e.lngLat)
-            .setHTML(`<strong>${escapeHtml(name)}</strong><br/><small>CLIMATE OBSERVATION · ${escapeHtml(date)}</small>`)
+            .setHTML(`<strong>${escapeHtml(name)}</strong><br/><small>CLIMATE OBSERVATION · ${escapeHtml(latestDate.current)}</small>`)
             .addTo(m);
         });
         m.on("mouseenter", "states-fill", () => { m.getCanvas().style.cursor = "pointer"; });
@@ -105,9 +111,11 @@ export default function ClimateMap({ layers, date = "2024-07-15", onStateSelect,
 
         // Rainfall is served as a provider-backed raster tile layer so the
         // browser does not download the entire IMD point grid for every date.
+        // The tile URL embeds the date, so a temporal update replaces the source
+        // rather than the map.
         m.addSource("climate-rainfall", {
           type: "raster",
-          tiles: [`/api/climate/tiles/rainfall/${date}/{z}/{x}/{y}.png`],
+          tiles: [rainfallTileUrl(latestDate.current)],
           tileSize: 256,
           attribution: "IMD rainfall data",
         });
@@ -119,50 +127,13 @@ export default function ClimateMap({ layers, date = "2024-07-15", onStateSelect,
           layout: { visibility: latestLayers.current.rainfall ? "visible" : "none" },
         });
 
-        const keys: LayerKey[] = ["temperature", "lst", "sst", "anomalies", "risk", "events"];
-        const payloads = await Promise.all(keys.map(async key => {
-          try {
-            const r = await fetch(`/api/gods-eye/layer/${key}/${date}`, { cache: "no-store" });
-            return [key, r.ok ? await r.json() : null] as const;
-          } catch { return [key, null] as const;
-          }
-        }));
-
-        for (const [key, payload] of payloads) {
-          if (!payload?.features || !Array.isArray(payload.features)) continue;
+        // No scenario overlay is drawn on the map. The scenario engine returns
+        // national aggregate hazard statistics with no spatial geometry, so a
+        // map layer would have nothing truthful to render.
+        for (const key of POINT_LAYERS) {
           const sourceId = `climate-${key}`;
-          const layerId = `climate-${key}`;
-          const source: GeoJSONSourceSpecification = { type: "geojson", data: payload };
-          m.addSource(sourceId, source);
-          if (key === "events") {
-            m.addLayer({
-              id: layerId, type: "circle", source: sourceId,
-              paint: { "circle-radius": 6, "circle-color": "#ff8b82", "circle-stroke-color": "#fff0ee", "circle-stroke-width": 1.2, "circle-opacity": 0.9 },
-              layout: { visibility: latestLayers.current.events ? "visible" : "none" },
-            });
-          } else if (key === "risk") {
-            m.addLayer({
-              id: layerId, type: "circle", source: sourceId,
-              paint: {
-                "circle-radius": 5,
-                "circle-color": ["match", ["get", "risk_category"], "extreme", "#ef4444", "high", "#f97316", "moderate", "#ffc176", "low", "#38bdf8", "#64748b"],
-                "circle-opacity": 0.78,
-              },
-              layout: { visibility: latestLayers.current.risk ? "visible" : "none" },
-            });
-          } else {
-            m.addLayer({
-              id: layerId, type: "circle", source: sourceId,
-              paint: {
-                "circle-radius": ["interpolate", ["linear"], ["zoom"], 3, 2.5, 7, 6],
-                "circle-color": key === "rainfall"
-                  ? ["interpolate", ["linear"], ["get", "rainfall_mm"], 0, "#38bdf8", 50, "#ffc176", 100, "#ff5f5f"]
-                  : "#7ddfff",
-                "circle-opacity": 0.70,
-              },
-              layout: { visibility: latestLayers.current[key] ? "visible" : "none" },
-            });
-          }
+          m.addSource(sourceId, { type: "geojson", data: emptyCollection() });
+          m.addLayer(pointLayerSpec(key, sourceId));
         }
 
         m.on("click", ["climate-rainfall", "climate-risk", "climate-events"], e => {
@@ -172,25 +143,73 @@ export default function ClimateMap({ layers, date = "2024-07-15", onStateSelect,
             .map(([k, v]) => `<div><b>${escapeHtml(k)}</b>: ${escapeHtml(String(v))}</div>`).join("");
           new Popup({ closeButton: true }).setLngLat(e.lngLat).setHTML(rows || "CLIMATE OBSERVATION").addTo(m);
         });
+
+        // The style is only usable once loaded; signal so the data effects below
+        // can populate the point layers and district geometry.
+        setStyleReady(v => v + 1);
       } catch (error) {
         console.error("Climate God's-Eye map data error", error);
       }
     });
 
     return () => { m.remove(); map.current = null; };
-  }, [date]);
+  }, []);
 
+  // Layer visibility only. Runs after the style is ready.
   useEffect(() => {
     const m = map.current;
     if (!m || !m.isStyleLoaded()) return;
-    const set = (key: LayerKey, visible: boolean) => {
+    for (const key of ALL_LAYERS) {
       const id = `climate-${key}`;
-      if (m.getLayer(id)) m.setLayoutProperty(id, "visibility", visible ? "visible" : "none");
-    };
-    (Object.keys(layers) as LayerKey[]).forEach(key => set(key, layers[key]));
-    if (m.getLayer("states-fill")) m.setPaintProperty("states-fill", "fill-opacity", 0.20);
-    if (m.getLayer("states-outline")) m.setPaintProperty("states-outline", "line-opacity", 0.82);
-  }, [layers]);
+      if (m.getLayer(id)) m.setLayoutProperty(id, "visibility", layers[key] ? "visible" : "none");
+    }
+  }, [layers, styleReady]);
+
+  // Temporal update: rainfall raster tiles and every point layer are re-pointed
+  // at the new date. No map, source or layer is destroyed.
+  useEffect(() => {
+    const m = map.current;
+    if (!m || !styleReady) return;
+    // A layer must be removed before the source it references.
+    if (m.getLayer("climate-rainfall")) m.removeLayer("climate-rainfall");
+    if (m.getSource("climate-rainfall")) m.removeSource("climate-rainfall");
+    m.addSource("climate-rainfall", {
+      type: "raster",
+      tiles: [rainfallTileUrl(date)],
+      tileSize: 256,
+      attribution: "IMD rainfall data",
+    });
+    m.addLayer({
+      id: "climate-rainfall",
+      type: "raster",
+      source: "climate-rainfall",
+      paint: { "raster-opacity": 0.68, "raster-fade-duration": 150 },
+      layout: { visibility: latestLayers.current.rainfall ? "visible" : "none" },
+    });
+
+    let alive = true;
+    const controller = new AbortController();
+    (async () => {
+      const payloads = await Promise.all(POINT_LAYERS.map(async key => {
+        try {
+          const r = await fetch(`/api/gods-eye/layer/${key}/${date}`, { cache: "no-store", signal: controller.signal });
+          return [key, r.ok ? await r.json() : null] as const;
+        } catch { return [key, null] as const; }
+      }));
+      if (!alive) return;
+      for (const [key, payload] of payloads) {
+        const source = m.getSource(`climate-${key}`);
+        if (!source || !("setData" in source)) continue;
+        // A layer with no validated provider returns no features; the source is
+        // emptied rather than left showing the previous date's points.
+        const data = payload?.features?.length ? payload : emptyCollection();
+        (source as unknown as { setData(d: GeoJSON.FeatureCollection): void }).setData(data);
+      }
+    })();
+    return () => { alive = false; controller.abort(); };
+  }, [date, styleReady]);
+
+  // Scenario overlay is intentionally absent: see the note where layers are added.
 
   useEffect(() => {
     const m = map.current;
@@ -229,7 +248,7 @@ export default function ClimateMap({ layers, date = "2024-07-15", onStateSelect,
       })
       .catch(() => {});
     return () => { alive = false; };
-  }, [selectedState]);
+  }, [selectedState, styleReady]);
 
   useEffect(() => {
     const m = map.current;
@@ -240,6 +259,47 @@ export default function ClimateMap({ layers, date = "2024-07-15", onStateSelect,
   }, [zoomRequest]);
 
   return <div ref={el} className="climate-map" aria-label="India Climate Digital Twin God's-Eye map" />;
+}
+
+const ALL_LAYERS: MapLayerKey[] = ["rainfall", ...POINT_LAYERS];
+
+function rainfallTileUrl(date: string) {
+  return `/api/climate/tiles/rainfall/${encodeURIComponent(date)}/{z}/{x}/{y}.png`;
+}
+
+function emptyCollection(): GeoJSON.FeatureCollection {
+  return { type: "FeatureCollection", features: [] };
+}
+
+function pointLayerSpec(key: MapLayerKey, sourceId: string): LayerSpecification {
+  const visibility = "none" as const;
+  if (key === "events") {
+    return {
+      id: `climate-${key}`, type: "circle", source: sourceId,
+      paint: { "circle-radius": 6, "circle-color": "#ff8b82", "circle-stroke-color": "#fff0ee", "circle-stroke-width": 1.2, "circle-opacity": 0.9 },
+      layout: { visibility },
+    };
+  }
+  if (key === "risk") {
+    return {
+      id: `climate-${key}`, type: "circle", source: sourceId,
+      paint: {
+        "circle-radius": 5,
+        "circle-color": ["match", ["get", "risk_category"], "extreme", "#ef4444", "high", "#f97316", "moderate", "#ffc176", "low", "#38bdf8", "#64748b"],
+        "circle-opacity": 0.78,
+      },
+      layout: { visibility },
+    };
+  }
+  return {
+    id: `climate-${key}`, type: "circle", source: sourceId,
+    paint: {
+      "circle-radius": ["interpolate", ["linear"], ["zoom"], 3, 2.5, 7, 6],
+      "circle-color": "#7ddfff",
+      "circle-opacity": 0.70,
+    },
+    layout: { visibility },
+  };
 }
 
 function escapeHtml(value: string) {

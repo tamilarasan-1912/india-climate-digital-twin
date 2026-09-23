@@ -13,6 +13,10 @@
 export const DEFAULT_DEV_ORIGINS = [
   "**.localhost",
   "localhost",
+  // IPv4 loopback. Next.js only appends the server's own startup hostname to
+  // this list, so with `-H 0.0.0.0` neither loopback form is covered and the dev
+  // client is blocked when the app is opened at http://127.0.0.1:3000.
+  "127.0.0.1",
   "10.*.*.*",
   "192.168.*.*",
   "172.*.*.*",
