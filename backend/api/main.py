@@ -226,7 +226,13 @@ def system_status():
         "district_climate": capability("AVAILABLE", note="district rainfall aggregated from real IMD grid cells covered by geoBoundaries ADM2 polygons; districts without intersecting grid centres report no_grid_coverage"),
         "flood_twin": capability("BLOCKED", note="no validated hydraulic model configured"),
         "ocean_and_land_layers": {
-            key: capability("PROVIDER REQUIRED" if layer_catalog[key]["status"] != "connected" else "CONNECTED")
+            key: capability(
+                "PROVIDER REQUIRED"
+                if not providers[key]["url_configured"]
+                else "CONFIGURED (VALIDATION PENDING)",
+                env_var=providers[key]["env_var"],
+                providers=layer_catalog[key]["providers"],
+            )
             for key in ("temperature", "lst", "sst", "anomalies")
         },
     }

@@ -375,11 +375,17 @@ def _summarise_district(date: str, question: str, district_id: str) -> dict[str,
     }
 
 
-def _district_mentioned(question: str) -> str | None:
+class AdministrativeBoundaryUnavailable(RuntimeError):
+    """Raised internally when district intent needs an unavailable provider."""
+
+
+def _district_mentioned(question: str, *, strict: bool = False) -> str | None:
     """Resolve a district name in the question to a district identifier.
 
     Matching uses word boundaries: a substring test would match the district
-    "Una" inside the word "unavailable".
+    "Una" inside the word "unavailable". Callers that are answering a
+    location-specific question can use ``strict=True`` to distinguish an
+    unknown name from an unavailable boundary provider.
     """
     from backend.services.district_climate_service import _normalised_districts, normalise_admin_name
 
@@ -387,7 +393,13 @@ def _district_mentioned(question: str) -> str | None:
     if not target:
         return None
     matches = []
-    for item in _normalised_districts():
+    try:
+        districts = _normalised_districts()
+    except (FileNotFoundError, RuntimeError, OSError) as error:
+        if strict:
+            raise AdministrativeBoundaryUnavailable from error
+        return None
+    for item in districts:
         name = normalise_admin_name(item[1])
         if name and re.search(rf"\b{re.escape(name)}\b", target):
             matches.append((name, item))
@@ -396,6 +408,19 @@ def _district_mentioned(question: str) -> str | None:
     # Prefer the longest name so "North Goa" wins over "Goa".
     matches.sort(key=lambda pair: len(pair[0]), reverse=True)
     return matches[0][1][0]
+
+
+def _boundary_provider_no_data(question: str, date: str) -> dict[str, Any]:
+    return {
+        "answer": "District climate data is unavailable because validated ADM2 boundary geometry is not connected; no district value was estimated.",
+        "status": "NO_DATA",
+        "data_available": False,
+        "question": question,
+        "layer": "district",
+        "date": date,
+        "source": "geoBoundaries provider_required",
+        "provider_required": True,
+    }
 
 
 def _states_mentioned(question: str) -> list[str]:
@@ -465,7 +490,15 @@ def answer_question(question: str, date: str, layer: str = "rainfall") -> dict[s
         return _summarise_layer(requested, date, question)
     # District questions take precedence over state questions: a district name
     # usually contains its state's name (e.g. "Coimbatore, Tamil Nadu").
-    district_id = _district_mentioned(question)
+    try:
+        district_id = _district_mentioned(question, strict=True)
+    except AdministrativeBoundaryUnavailable:
+        # Do not fall through to a national/state aggregate for a question that
+        # explicitly targets a district or location. Missing ADM2 geometry is a
+        # scientific dependency, not permission to substitute a parent value.
+        if "district" in q or (" in " in q and "india" not in q):
+            return _boundary_provider_no_data(question, date)
+        district_id = None
     if district_id and ("district" in q or district_id):
         return _summarise_district(date, question, district_id)
     # "Which districts in <state> had the most rainfall" is a ranking request,
@@ -506,6 +539,9 @@ def get_intelligence_capabilities() -> dict[str, Any]:
             "provider-backed temperature/LST/SST/anomaly lookup",
             "model and Prithvi-WxC status",
         ],
-        "layer_status": {key: get_layer_status(key, "1970-01-01")["status"] for key in CLIMATE_LAYERS},
+        "layer_status": {
+            key: definition["status"]
+            for key, definition in CLIMATE_LAYERS.items()
+        },
         "no_data_message": NO_DATA_MESSAGE,
     }

@@ -23,7 +23,11 @@ logger = logging.getLogger(__name__)
 
 BASE = "https://www.geoboundaries.org/api/current/gbOpen/IND"
 CACHE_TTL = int(os.getenv("ADMIN_BOUNDARY_CACHE_TTL", "21600"))
-CACHE_DIR = Path(__file__).resolve().parents[2] / "backend" / "data" / "admin_cache"
+DEFAULT_CACHE_DIR = Path(__file__).resolve().parents[2] / "backend" / "data" / "admin_cache"
+# Deployments may mount a validated cache outside the application image. The
+# default remains the repository runtime-cache location and is never populated
+# with synthetic geometry.
+CACHE_DIR = Path(os.getenv("ADMIN_BOUNDARY_CACHE_DIR") or DEFAULT_CACHE_DIR)
 
 
 def _fetch_json(url: str) -> dict[str, Any]:
