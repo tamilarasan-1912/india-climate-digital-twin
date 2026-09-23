@@ -2,7 +2,14 @@ import type { NextConfig } from "next";
 import { resolveDevOrigins } from "./scripts/dev-origins.mjs";
 
 // Render-hosted FastAPI backend. NEXT_PUBLIC_API_URL can override this in Vercel.
-const API = (process.env.NEXT_PUBLIC_API_URL || "https://india-climate-digital-twin-api.onrender.com").replace(/\/$/, "");
+// In local development the Next server remains the browser-facing origin and
+// proxies relative /api requests to the configured backend.
+const API = (
+  process.env.NEXT_PUBLIC_API_URL ||
+  (process.env.NODE_ENV === "development"
+    ? "http://127.0.0.1:8000"
+    : "https://india-climate-digital-twin-api.onrender.com")
+).replace(/\/$/, "");
 
 // Development-only hostname allowlist covering localhost and private-range LAN
 // IPs, so the HMR WebSocket upgrades instead of being refused. No effect on
@@ -27,9 +34,14 @@ const API_PREFIXES = [
   "explain",
   "scenarios",
   "system",
+  "data",
+  "governance",
 ];
 
+
 const nextConfig: NextConfig = {
+  // Keep the dev server reachable from localhost, LAN clients, and the
+  // browser-facing preview proxy. See scripts/dev-origins.mjs.
   allowedDevOrigins,
   async rewrites() {
     return [

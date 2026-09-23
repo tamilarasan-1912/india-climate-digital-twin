@@ -41,6 +41,26 @@ class TwinEngineTests(unittest.TestCase):
         self.assertAlmostEqual(vector[6], (0.2 + 0.6 + 0.9) / 3)
         self.assertAlmostEqual(vector[8], 1 / 7)
 
+    def test_missing_state_inputs_remain_unavailable(self) -> None:
+        stats = {"minimum": 12.0, "maximum": 12.0, "mean": 12.0, "median": 12.0}
+        risk = {
+            "properties": {
+                "risk_distribution": {"low": 0, "moderate": 0, "high": 0, "extreme": 0},
+                "grid": {"valid_points": 0},
+            },
+            "features": [],
+        }
+
+        vector = twin_engine._state_vector(stats, [], risk)
+
+        self.assertEqual(vector[0], 12.0)
+        self.assertIsNone(vector[3])
+        self.assertIsNone(vector[4])
+        self.assertIsNone(vector[5])
+        self.assertIsNone(vector[6])
+        self.assertIsNone(vector[7])
+        self.assertIsNone(vector[8])
+
     @patch.object(twin_engine, "get_dataset_info")
     @patch.object(twin_engine, "get_climate_risk_grid")
     @patch.object(twin_engine, "get_daily_statistics")

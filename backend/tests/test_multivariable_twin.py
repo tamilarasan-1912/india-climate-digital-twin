@@ -84,3 +84,21 @@ def test_climate_state_discovery_requires_a_usable_variable():
     usable = [match for match in registry["matches"] if "variable" in match]
     if not usable:
         assert registry["status"] == "no_data"
+
+
+def test_multihazard_treats_nonfinite_inputs_as_no_data():
+    state = {
+        "twin_state": {
+            "variables": {
+                "rainfall": {"statistics": {"mean": float("nan")}},
+                "temperature": {"statistics": {"mean": float("inf")}},
+            }
+        }
+    }
+
+    result = calculate_hazards(state)
+
+    assert result["status"] == "no_data"
+    assert result["overall_screening"] is None
+    assert result["hazards"]["extreme_rainfall"]["status"] == "no_data"
+    assert result["hazards"]["heat"]["status"] == "no_data"

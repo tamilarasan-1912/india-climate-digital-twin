@@ -57,13 +57,18 @@ def _history_before(series: list[dict[str, Any]], target: str, days: int) -> lis
     return [item for item in series if start.isoformat() <= item["date"] < target]
 
 
-def _state_vector(stats: dict[str, float], history_values: list[float], risk: dict[str, Any]) -> list[float]:
+def _state_vector(
+    stats: dict[str, float],
+    history_values: list[float],
+    risk: dict[str, Any],
+) -> list[float | None]:
+    """Build the state vector without replacing undefined statistics with zero."""
     current = float(stats["mean"])
-    rolling = float(np.mean(history_values[-7:])) if history_values else current
-    baseline = float(np.mean(history_values)) if history_values else current
-    std = float(np.std(history_values)) if history_values else 0.0
-    anomaly = current - baseline
-    z = anomaly / std if std > 1e-12 else 0.0
+    rolling = float(np.mean(history_values[-7:])) if history_values else None
+    baseline = float(np.mean(history_values)) if history_values else None
+    std = float(np.std(history_values)) if history_values else None
+    anomaly = current - baseline if baseline is not None else None
+    z = anomaly / std if anomaly is not None and std is not None and std > 1e-12 else None
     props = risk["properties"]
     grid_scores = []
     for feature in risk["features"]:
@@ -71,8 +76,12 @@ def _state_vector(stats: dict[str, float], history_values: list[float], risk: di
         if score is not None and np.isfinite(float(score)):
             grid_scores.append(float(score))
     distribution = props["risk_distribution"]
-    valid = max(1, int(props["grid"]["valid_points"]))
-    extreme_fraction = float(distribution.get("extreme", 0)) / valid
+    valid = int(props["grid"].get("valid_points", 0))
+    extreme_fraction = (
+        float(distribution.get("extreme", 0)) / valid
+        if valid > 0
+        else None
+    )
     return [
         current,
         float(stats["median"]),
@@ -80,8 +89,8 @@ def _state_vector(stats: dict[str, float], history_values: list[float], risk: di
         rolling,
         anomaly,
         z,
-        float(np.mean(grid_scores)) if grid_scores else 0.0,
-        float(np.max(grid_scores)) if grid_scores else 0.0,
+        float(np.mean(grid_scores)) if grid_scores else None,
+        float(np.max(grid_scores)) if grid_scores else None,
         extreme_fraction,
     ]
 

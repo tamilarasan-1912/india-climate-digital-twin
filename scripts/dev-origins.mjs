@@ -21,11 +21,16 @@ export const DEFAULT_DEV_ORIGINS = [
   "192.168.*.*",
   "172.*.*.*",
   "*.local",
+  // Preview proxies use a per-session subdomain. Development only, and never
+  // applied to a production build.
+  "**.e2b.app",
 ];
 
 /** Merge the private-range defaults with any extra hosts from ALLOWED_DEV_ORIGINS. */
 export function resolveDevOrigins(env = process.env) {
-  const configured = (env.ALLOWED_DEV_ORIGINS || "")
+  // NEXT_ALLOWED_DEV_ORIGINS is the documented name; ALLOWED_DEV_ORIGINS is
+  // accepted so existing deployments keep working.
+  const configured = ((env.NEXT_ALLOWED_DEV_ORIGINS || env.ALLOWED_DEV_ORIGINS) || "")
     .split(",")
     .map(origin => origin.trim())
     .filter(Boolean);
