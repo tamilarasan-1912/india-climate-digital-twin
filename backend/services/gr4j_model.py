@@ -159,17 +159,99 @@ def _unit_hydrograph_ordinates(X4: float) -> np.ndarray:
     return ordinates
 
 
-def _estimate_pet_from_temp(temp_c: np.ndarray, lat: float) -> np.ndarray:
-    """Estimate PET using Hargreaves equation (simplified).
-
-    PET = 0.0023 * (T_mean + 17.8) * (T_max - T_min)^0.5 * Ra
-    where Ra is extraterrestrial radiation (simplified here).
-    """
-    # Simplified: assume T_max - T_min ≈ 10°C, Ra ≈ 15 mm/day
-    # This is a rough approximation; real implementation needs daily Tmax/Tmin
+def _estimate_pet_from_temp(temp_c: np.ndarray) -> np.ndarray:
+    """Legacy PET estimation from temperature array."""
     t_mean = temp_c
     pet = 0.0023 * (t_mean + 17.8) * np.sqrt(10.0) * 15.0
     return np.maximum(pet, 0.0)
+
+
+# Basin configurations with metadata from pilot data
+BASIN_CONFIGS = {
+    "mahanadi_delta_sub_1": {
+        "area_km2": 15000,
+        "bbox": {"min_lon": 80.5, "max_lon": 87.5, "min_lat": 18.5, "max_lat": 23.5},
+        "dem_path": "/workspace/f3031bab-c4f7-4425-9cd8-fb4088af3cb6/sessions/backend/data/basins/mahanadi_delta/dem_copernicus_30m.nc",
+        "landcover_path": "/workspace/f3031bab-c4f7-4425-9cd8-fb4088af3cb6/sessions/backend/data/basins/mahanadi_delta/worldcover_10m.nc",
+        "metadata_path": "/workspace/f3031bab-c4f7-4425-9cd8-fb4088af3cb6/sessions/backend/data/basins/mahanadi_delta/basin_metadata.json",
+    },
+    "mahanadi_delta_sub_2": {
+        "area_km2": 12000,
+        "bbox": {"min_lon": 83.0, "max_lon": 86.5, "min_lat": 19.5, "max_lat": 22.0},
+        "dem_path": "/workspace/f3031bab-c4f7-4425-9cd8-fb4088af3cb6/sessions/backend/data/basins/mahanadi_delta/dem_copernicus_30m.nc",
+        "landcover_path": "/workspace/f3031bab-c4f7-4425-9cd8-fb4088af3cb6/sessions/backend/data/basins/mahanadi_delta/worldcover_10m.nc",
+        "metadata_path": "/workspace/f3031bab-c4f7-4425-9cd8-fb4088af3cb6/sessions/backend/data/basins/mahanadi_delta/basin_metadata.json",
+    },
+}
+
+
+def _load_basin_config(basin_id: str) -> dict[str, Any]:
+    """Load basin configuration and metadata."""
+    config = BASIN_CONFIGS.get(basin_id, BASIN_CONFIGS["mahanadi_delta_sub_1"]).copy()
+    
+    # Try to load metadata for additional info
+    meta_path = Path(config["metadata_path"])
+    if meta_path.exists():
+        try:
+            with open(meta_path) as f:
+                metadata = json.load(f)
+            config["metadata"] = metadata
+        except Exception:
+            pass
+    
+    return config
+
+
+def _load_dem(basin_id: str) -> xr.DataArray | None:
+    """Load DEM for basin."""
+    config = _load_basin_config(basin_id)
+    dem_path = Path(config["dem_path"])
+    if not dem_path.exists():
+        return None
+    try:
+        return xr.open_dataarray(dem_path)
+    except Exception:
+        return None
+
+
+def _load_landcover(basin_id: str) -> xr.DataArray | None:
+    """Load land cover for basin."""
+    config = _load_basin_config(basin_id)
+    lc_path = Path(config["landcover_path"])
+    if not lc_path.exists():
+        return None
+    try:
+        return xr.open_dataarray(lc_path)
+    except Exception:
+        return None
+
+
+def _estimate_pet_from_elevation(
+    elevation: np.ndarray,
+    lat: np.ndarray,
+    day_of_year: int,
+) -> float:
+    """Estimate PET using Hargreaves-Samani equation with elevation correction.
+    
+    PET = 0.0023 * (T_mean + 17.8) * sqrt(T_max - T_min) * Ra
+    
+    With elevation correction: T decreases ~6.5°C per 1000m
+    """
+    # Mean elevation of basin (m)
+    mean_elev = float(np.nanmean(elevation))
+    
+    # Approximate temperature at sea level for this latitude/day
+    # Simplified: T_mean ≈ 25 - 0.01 * lat - 0.0065 * elev
+    mean_lat = float(np.nanmean(lat))
+    t_mean = 25.0 - 0.01 * mean_lat - 0.0065 * mean_elev
+    t_range = 10.0  # Assumed diurnal range
+    
+    # Extraterrestrial radiation (simplified)
+    # Ra ≈ 15 MJ/m²/day for India latitudes
+    ra = 15.0
+    
+    pet = 0.0023 * (t_mean + 17.8) * math.sqrt(t_range) * ra
+    return max(0.0, pet)
 
 
 def _get_basin_rainfall_pet(
@@ -178,39 +260,112 @@ def _get_basin_rainfall_pet(
     end_date: str,
     rainfall_source: str = "imd_rf25",
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Extract basin-averaged rainfall and estimate PET for date range."""
-    # For now, use national average rainfall as proxy
-    # In production, this would use basin polygon to extract grid cells
+    """Extract basin-averaged rainfall and estimate PET for date range.
+    
+    Uses basin bbox to clip IMD rainfall grid, and DEM for PET estimation.
+    """
+    config = _load_basin_config(basin_id)
+    bbox = config["bbox"]
+    
     with read_dataset() as ds:
         rainfall_var = ds["RAINFALL"]
         time_coord = "TIME" if "TIME" in ds.coords else "time"
         lat_coord = "LATITUDE" if "LATITUDE" in ds.coords else "latitude"
         lon_coord = "LONGITUDE" if "LONGITUDE" in ds.coords else "longitude"
-
-        start = date_type.fromisoformat(start_date)
-        end = date_type.fromisoformat(end_date)
-
+        
+        lats = ds[lat_coord].values
+        lons = ds[lon_coord].values
+        
+        # Find grid cells within basin bbox
+        lat_mask = (lats >= bbox["min_lat"]) & (lats <= bbox["max_lat"])
+        lon_mask = (lons >= bbox["min_lon"]) & (lons <= bbox["max_lon"])
+        
         # Select time slice
         time_slice = slice(start_date, end_date)
         rainfall_data = rainfall_var.sel({time_coord: time_slice})
-
-        # National spatial average (all valid grid cells)
+        
+        # Basin spatial average (only grid cells within bbox)
         rainfall_daily = []
         for t in range(rainfall_data.sizes[time_coord]):
             daily = rainfall_data.isel({time_coord: t}).values
-            valid = daily[np.isfinite(daily)]
+            # Mask to basin bbox
+            basin_daily = daily[lat_mask, :][:, lon_mask]
+            valid = basin_daily[np.isfinite(basin_daily)]
             if len(valid) > 0:
                 rainfall_daily.append(float(np.mean(valid)))
             else:
                 rainfall_daily.append(0.0)
 
     rainfall_arr = np.array(rainfall_daily)
-
-    # Estimate PET from temperature (using a constant approximation for now)
-    # In production, this would use temperature data
-    pet_arr = np.full_like(rainfall_arr, 4.0)  # ~4 mm/day average for India
-
+    
+    # Estimate PET using basin DEM
+    dem = _load_dem(basin_id)
+    if dem is not None:
+        # Get mean elevation and latitude for basin
+        elev_values = dem.values
+        # Coordinates are in the dataarray
+        dem_lats = dem.coords["lat"].values if "lat" in dem.coords else np.array([21.0])
+        
+        # Estimate PET for each day (simplified - same PET for all days)
+        pet_daily = []
+        start_dt = date_type.fromisoformat(start_date)
+        for i, _ in enumerate(rainfall_daily):
+            doy = (start_dt + timedelta(days=i)).timetuple().tm_yday
+            pet = _estimate_pet_from_elevation(elev_values, dem_lats, doy)
+            pet_daily.append(pet)
+        pet_arr = np.array(pet_daily)
+    else:
+        # Fallback: constant PET
+        pet_arr = np.full_like(rainfall_arr, 4.0)  # ~4 mm/day average for India
+    
     return rainfall_arr, pet_arr
+
+
+def _estimate_gr4j_params_from_basin(basin_id: str) -> dict[str, float]:
+    """Estimate initial GR4J parameters from basin characteristics.
+    
+    Uses area, elevation, land cover to provide better initial guess.
+    """
+    config = _load_basin_config(basin_id)
+    area_km2 = config["area_km2"]
+    
+    # Load DEM for elevation statistics
+    dem = _load_dem(basin_id)
+    mean_elev = 100.0
+    if dem is not None:
+        mean_elev = float(np.nanmean(dem.values))
+    
+    # Load land cover for soil/vegetation info
+    lc = _load_landcover(basin_id)
+    forest_frac = 0.3
+    if lc is not None:
+        # Class 10 = Tree cover
+        forest_frac = float(np.sum(lc.values == 10) / lc.size)
+    
+    # Empirical relationships for Indian basins (approximate)
+    # X1: Production store capacity - related to soil depth, vegetation
+    # X2: Exchange coefficient - related to geology, aquifer
+    # X3: Routing store capacity - related to basin size, channel network
+    # X4: Unit hydrograph time base - related to basin length, slope
+    
+    # Scale X1 with forest cover (more forest -> higher storage)
+    X1 = 200 + 200 * forest_frac  # 200-400 mm
+    
+    # X2: Small for Indian basins (typically 0.1-2.0)
+    X2 = 0.5
+    
+    # X3 scales with basin area (roughly)
+    X3 = 20 + 0.002 * area_km2  # 20-50 mm
+    
+    # X4 relates to basin length / slope (from DEM)
+    X4 = 1.5 + 0.0005 * mean_elev  # 1.5-3 days
+    
+    return {
+        "X1": X1,
+        "X2": X2,
+        "X3": X3,
+        "X4": X4,
+    }
 
 
 def run_gr4j_simulation(
@@ -224,7 +379,13 @@ def run_gr4j_simulation(
 
     Returns discharge time series in m³/s (converted from mm/day over basin area).
     """
-    params = {**DEFAULT_GR4J_PARAMS, **(parameters or {})}
+    config = _load_basin_config(basin_id)
+    area_km2 = config["area_km2"]
+    
+    # Use estimated parameters if none provided
+    if parameters is None:
+        parameters = _estimate_gr4j_params_from_basin(basin_id)
+    params = {**DEFAULT_GR4J_PARAMS, **parameters}
 
     # Get rainfall and PET
     rainfall, pet = _get_basin_rainfall_pet(basin_id, start_date, end_date, rainfall_source)
@@ -234,13 +395,6 @@ def run_gr4j_simulation(
 
     # Convert mm/day to m³/s (approximate)
     # 1 mm over 1 km² = 1000 m³/day = 0.01157 m³/s
-    # For Mahanadi delta sub-basin (~15,000 km²): 1 mm = 173.6 m³/s
-    # This is a rough conversion; real implementation needs actual basin area
-    BASIN_AREA_KM2 = {
-        "mahanadi_delta_sub_1": 15000,
-        "mahanadi_delta_sub_2": 12000,
-    }
-    area_km2 = BASIN_AREA_KM2.get(basin_id, 15000)
     mm_to_m3s = area_km2 * 1000 / 86400  # mm/day * km² -> m³/s
     discharge_m3s = discharge_mm * mm_to_m3s
 
