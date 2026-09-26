@@ -48,6 +48,13 @@ from backend.services.simulation_jobs import (
     JOB_STATUS_CANCELLED,
 )
 from backend.services.multilingual_alert_service import render_alert
+from backend.services.validation_uncertainty import (
+    compute_all_metrics,
+    parameter_ensemble,
+    run_parameter_uncertainty,
+    cross_validate,
+    forecast_verification,
+)
 
 router = APIRouter(prefix="/api/v1", tags=["industry-platform"])
 
@@ -533,3 +540,179 @@ def flood_asset_risk_record(
         data_quality_score=data_quality_score,
         validation_status=validation_status,
     )
+
+
+# -------------------- VALIDATION & UNCERTAINTY --------------------
+@router.post("/validation/hydrological")
+def validate_hydrological_model(
+    observed: list[float],
+    simulated: list[float],
+) -> dict[str, Any]:
+    """Compute all standard hydrological validation metrics (NSE, KGE, RMSE, etc.)."""
+    import numpy as np
+    
+    obs = np.array(observed, dtype=float)
+    sim = np.array(simulated, dtype=float)
+    
+    if len(obs) != len(sim):
+        raise HTTPException(status_code=400, detail="Observed and simulated arrays must have same length")
+    if len(obs) < 2:
+        raise HTTPException(status_code=400, detail="At least 2 data points required")
+    
+    return compute_all_metrics(obs, sim)
+
+
+@router.post("/validation/parameter-uncertainty")
+def validate_parameter_uncertainty(
+    param_ranges: dict[str, list[float]],  # {param: [min, max]}
+    observed: list[float],
+    n_samples: int = 100,
+    basin_id: str = "mahanadi_delta_sub_1",
+    start_date: str = "2024-07-01",
+    end_date: str = "2024-07-10",
+) -> dict[str, Any]:
+    """Run GR4J with parameter ensemble and compute uncertainty bounds."""
+    import numpy as np
+    from backend.services.gr4j_model import run_gr4j_simulation
+    
+    # Convert param ranges
+    ranges = {k: (v[0], v[1]) for k, v in param_ranges.items()}
+    
+    # Get observed (in production, this would come from gauge data)
+    obs = np.array(observed, dtype=float)
+    
+    def gr4j_wrapper(params, **kwargs):
+        result = run_gr4j_simulation(
+            basin_id=basin_id,
+            start_date=start_date,
+            end_date=end_date,
+            parameters=params,
+        )
+        return np.array(result["discharge_m3s"], dtype=float)
+    
+    return run_parameter_uncertainty(
+        model_func=gr4j_wrapper,
+        param_ranges=ranges,
+        observed=obs,
+        n_samples=n_samples,
+    )
+
+
+@router.post("/validation/cross-validation")
+def validate_cross_validation(
+    param_ranges: dict[str, list[float]],
+    observed: list[float],
+    n_folds: int = 5,
+    n_samples_per_fold: int = 50,
+    basin_id: str = "mahanadi_delta_sub_1",
+    start_date: str = "2024-07-01",
+    end_date: str = "2024-07-10",
+) -> dict[str, Any]:
+    """Cross-validation for GR4J model."""
+    import numpy as np
+    from backend.services.gr4j_model import run_gr4j_simulation
+    
+    ranges = {k: (v[0], v[1]) for k, v in param_ranges.items()}
+    obs = np.array(observed, dtype=float)
+    
+    def gr4j_wrapper(params, **kwargs):
+        result = run_gr4j_simulation(
+            basin_id=basin_id,
+            start_date=start_date,
+            end_date=end_date,
+            parameters=params,
+        )
+        return np.array(result["discharge_m3s"], dtype=float)
+    
+    return cross_validate(
+        model_func=gr4j_wrapper,
+        param_ranges=ranges,
+        observed=obs,
+        n_folds=n_folds,
+        n_samples_per_fold=n_samples_per_fold,
+    )
+
+
+@router.post("/validation/forecast-verification")
+def validate_forecast_verification(
+    forecasts: list[float],
+    observations: list[float],
+) -> dict[str, Any]:
+    """Basic forecast verification metrics."""
+    import numpy as np
+    
+    f = np.array(forecasts, dtype=float)
+    o = np.array(observations, dtype=float)
+    
+    if len(f) != len(o):
+        raise HTTPException(status_code=400, detail="Forecasts and observations must have same length")
+    
+    return forecast_verification(f, o)
+
+
+@router.get("/validation/metrics-catalog")
+def validation_metrics_catalog() -> dict[str, Any]:
+    """Catalog of available validation metrics and their interpretations."""
+    return {
+        "metrics": {
+            "nse": {
+                "name": "Nash-Sutcliffe Efficiency",
+                "range": "[-inf, 1]",
+                "perfect": 1.0,
+                "interpretation": "1=perfect, 0=mean obs benchmark, <0=worse than mean",
+                "recommended_threshold": ">0.5 acceptable, >0.7 good, >0.9 excellent",
+            },
+            "kge": {
+                "name": "Kling-Gupta Efficiency",
+                "range": "[-inf, 1]",
+                "perfect": 1.0,
+                "interpretation": "Decomposes into correlation, bias, variability",
+                "recommended_threshold": ">0.5 acceptable, >0.7 good, >0.9 excellent",
+            },
+            "rmse": {
+                "name": "Root Mean Square Error",
+                "range": "[0, +inf]",
+                "perfect": 0.0,
+                "interpretation": "Same units as observations; lower is better",
+            },
+            "mae": {
+                "name": "Mean Absolute Error",
+                "range": "[0, +inf]",
+                "perfect": 0.0,
+                "interpretation": "Less sensitive to outliers than RMSE",
+            },
+            "pbias": {
+                "name": "Percent Bias",
+                "range": "[-inf, +inf]",
+                "perfect": 0.0,
+                "interpretation": "+ = overestimation, - = underestimation",
+                "recommended_threshold": "<±10% good, <±25% acceptable",
+            },
+            "rsr": {
+                "name": "RMSE/Std(obs) Ratio",
+                "range": "[0, +inf]",
+                "perfect": 0.0,
+                "interpretation": "Normalized RMSE; <0.5 good, <0.7 acceptable",
+            },
+            "log_nse": {
+                "name": "Log-transformed NSE",
+                "range": "[-inf, 1]",
+                "perfect": 1.0,
+                "interpretation": "Better for low-flow performance",
+            },
+            "correlation": {
+                "name": "Pearson Correlation",
+                "range": "[-1, 1]",
+                "perfect": 1.0,
+                "interpretation": "Timing/pattern agreement only (not bias)",
+            },
+        },
+        "peak_flow_metrics": {
+            "magnitude_error_pct": "Peak discharge magnitude error (%)",
+            "timing_error_days": "Peak timing offset (days)",
+        },
+        "flow_percentile_metrics": {
+            "low_flow_error_pct": "Error at 10th percentile (low flows)",
+            "high_flow_error_pct": "Error at 90th percentile (high flows)",
+        },
+    }
