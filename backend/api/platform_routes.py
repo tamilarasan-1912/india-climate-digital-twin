@@ -21,6 +21,14 @@ from backend.services.dataset_catalog_store import (
     search_datasets,
 )
 from backend.services.exposure_engine import assess_exposure
+from backend.services.flood_risk_engine import (
+    calculate_asset_flood_damage,
+    calculate_population_exposure,
+    calculate_expected_annual_damage,
+    assess_flood_risk_grid,
+    build_flood_risk_record,
+    DEPTH_DAMAGE_CURVES,
+)
 from backend.services.flood_twin_service import get_flood_twin_status
 from backend.services.gr4j_model import run_gr4j_simulation
 from backend.services.heat_risk_engine import assess_heat_risk
@@ -353,3 +361,175 @@ def run_gr4j_sync(
         parameters=parameters,
     )
     return result
+
+
+# -------------------- FLOOD RISK --------------------
+@router.get("/flood/risk/depth-damage-curves")
+def flood_depth_damage_curves() -> dict[str, Any]:
+    """Get available depth-damage curves and their parameters."""
+    return {
+        "curves": {
+            asset_type: {
+                "description": info["description"],
+                "source": info["source"],
+                "points": info["curve"],
+            }
+            for asset_type, info in DEPTH_DAMAGE_CURVES.items()
+        },
+        "default_asset_type": "residential",
+        "scientific_status": "curve_catalog",
+    }
+
+
+@router.post("/flood/risk/asset-damage")
+def flood_asset_damage(
+    asset_id: str,
+    asset_type: str,
+    replacement_value_inr: float,
+    flood_depth_m: float,
+    velocity_mps: float | None = None,
+    duration_hours: float | None = None,
+    content_value_ratio: float = 0.5,
+) -> dict[str, Any]:
+    """Calculate flood damage for a single asset using depth-damage curves."""
+    if asset_type not in DEPTH_DAMAGE_CURVES:
+        raise HTTPException(status_code=400, detail=f"Unknown asset_type. Available: {list(DEPTH_DAMAGE_CURVES.keys())}")
+    if flood_depth_m < 0:
+        raise HTTPException(status_code=400, detail="flood_depth_m must be >= 0")
+    if replacement_value_inr <= 0:
+        raise HTTPException(status_code=400, detail="replacement_value_inr must be > 0")
+    
+    return calculate_asset_flood_damage(
+        asset_id=asset_id,
+        asset_type=asset_type,
+        replacement_value_inr=replacement_value_inr,
+        flood_depth_m=flood_depth_m,
+        velocity_mps=velocity_mps,
+        duration_hours=duration_hours,
+        content_value_ratio=content_value_ratio,
+    )
+
+
+@router.post("/flood/risk/population-exposure")
+def flood_population_exposure(
+    flood_extent_grid: list[list[int]],  # 0/1 grid
+    population_grid: list[list[float]],  # population per cell
+    flood_depth_grid: list[list[float]] | None = None,
+    velocity_grid: list[list[float]] | None = None,
+    hazard_threshold_depth: float = 0.15,
+) -> dict[str, Any]:
+    """Calculate population exposed to flooding from grid data."""
+    import numpy as np
+    
+    extent = np.array(flood_extent_grid, dtype=bool)
+    pop = np.array(population_grid, dtype=float)
+    
+    if extent.shape != pop.shape:
+        raise HTTPException(status_code=400, detail="Grid shapes must match")
+    
+    depth = np.array(flood_depth_grid, dtype=float) if flood_depth_grid else None
+    vel = np.array(velocity_grid, dtype=float) if velocity_grid else None
+    
+    if depth is not None and depth.shape != extent.shape:
+        raise HTTPException(status_code=400, detail="Depth grid shape must match extent grid")
+    if vel is not None and vel.shape != extent.shape:
+        raise HTTPException(status_code=400, detail="Velocity grid shape must match extent grid")
+    
+    return calculate_population_exposure(
+        flood_extent_grid=extent,
+        population_grid=pop,
+        flood_depth_grid=depth,
+        velocity_grid=vel,
+        hazard_threshold_depth=hazard_threshold_depth,
+    )
+
+
+@router.post("/flood/risk/expected-annual-damage")
+def flood_expected_annual_damage(
+    asset_damages: list[dict[str, Any]],
+    annual_exceedance_probabilities: list[float] | None = None,
+) -> dict[str, Any]:
+    """Calculate Expected Annual Damage from multiple return period scenarios."""
+    return calculate_expected_annual_damage(
+        asset_damages=asset_damages,
+        annual_exceedance_probabilities=annual_exceedance_probabilities,
+    )
+
+
+@router.post("/flood/risk/grid")
+def flood_risk_grid(
+    hazard_grid: list[list[float]],      # flood depth in meters
+    exposure_grid: list[list[float]],    # population or asset value
+    vulnerability_grid: list[list[float]] | None = None,
+    velocity_grid: list[list[float]] | None = None,
+    cell_area_m2: float = 10000.0,
+) -> dict[str, Any]:
+    """Assess flood risk on a grid for mapping."""
+    import numpy as np
+    
+    hazard = np.array(hazard_grid, dtype=float)
+    exposure = np.array(exposure_grid, dtype=float)
+    
+    if hazard.shape != exposure.shape:
+        raise HTTPException(status_code=400, detail="Grid shapes must match")
+    
+    vuln = np.array(vulnerability_grid, dtype=float) if vulnerability_grid else None
+    vel = np.array(velocity_grid, dtype=float) if velocity_grid else None
+    
+    if vuln is not None and vuln.shape != hazard.shape:
+        raise HTTPException(status_code=400, detail="Vulnerability grid shape must match hazard grid")
+    if vel is not None and vel.shape != hazard.shape:
+        raise HTTPException(status_code=400, detail="Velocity grid shape must match hazard grid")
+    
+    return assess_flood_risk_grid(
+        hazard_grid=hazard,
+        exposure_grid=exposure,
+        vulnerability_grid=vuln,
+        velocity_grid=vel,
+        cell_area_m2=cell_area_m2,
+    )
+
+
+@router.post("/flood/risk/asset-record")
+def flood_asset_risk_record(
+    asset_id: str,
+    location_id: str,
+    asset_type: str,
+    replacement_value_inr: float,
+    flood_depth_m: float,
+    velocity_mps: float | None = None,
+    duration_hours: float | None = None,
+    content_value_ratio: float = 0.5,
+    population_exposed: int | None = None,
+    probability: float | None = None,
+    consequence_inr: float | None = None,
+    model_version: str = "flood_risk_engine-1.0.0",
+    data_quality_score: float | None = None,
+    validation_status: str = "unvalidated",
+) -> dict[str, Any]:
+    """Build a complete flood risk record for an asset (compatible with risk contract)."""
+    if asset_type not in DEPTH_DAMAGE_CURVES:
+        raise HTTPException(status_code=400, detail=f"Unknown asset_type. Available: {list(DEPTH_DAMAGE_CURVES.keys())}")
+    if flood_depth_m < 0:
+        raise HTTPException(status_code=400, detail="flood_depth_m must be >= 0")
+    if replacement_value_inr <= 0:
+        raise HTTPException(status_code=400, detail="replacement_value_inr must be > 0")
+    if probability is not None and (probability < 0 or probability > 1):
+        raise HTTPException(status_code=400, detail="probability must be between 0 and 1")
+    
+    return build_flood_risk_record(
+        asset_id=asset_id,
+        location_id=location_id,
+        asset_type=asset_type,
+        replacement_value_inr=replacement_value_inr,
+        flood_depth_m=flood_depth_m,
+        velocity_mps=velocity_mps,
+        duration_hours=duration_hours,
+        content_value_ratio=content_value_ratio,
+        population_exposed=population_exposed,
+        probability=probability,
+        consequence_inr=consequence_inr,
+        model_version=model_version,
+        data_quality_score=data_quality_score,
+        validation_status=validation_status,
+    )
