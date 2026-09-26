@@ -1,11 +1,11 @@
-"""Industry platform APIs: assets, exposure, risk, heat, scenarios, datasets and alerts."""
+"""Industry platform APIs: assets, exposure, risk, heat, scenarios, datasets, alerts and simulation jobs."""
 from __future__ import annotations
 
 import os
 from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Depends, Request
+from fastapi import APIRouter, HTTPException, Depends, Request, Query
 
 from backend.models.domain_models import Asset, Exposure
 from backend.services.alert_service import build_alert, get_language_catalog
@@ -22,10 +22,23 @@ from backend.services.dataset_catalog_store import (
 )
 from backend.services.exposure_engine import assess_exposure
 from backend.services.flood_twin_service import get_flood_twin_status
+from backend.services.gr4j_model import run_gr4j_simulation
 from backend.services.heat_risk_engine import assess_heat_risk
 from backend.services.risk_contract import get_risk_contract
 from backend.services.risk_engine import assess_asset
 from backend.services.scenario_engine import build_scenario
+from backend.services.simulation_jobs import (
+    submit_simulation_job,
+    get_job_status,
+    get_job_result,
+    cancel_job,
+    list_jobs,
+    JOB_STATUS_PENDING,
+    JOB_STATUS_RUNNING,
+    JOB_STATUS_COMPLETED,
+    JOB_STATUS_FAILED,
+    JOB_STATUS_CANCELLED,
+)
 from backend.services.multilingual_alert_service import render_alert
 
 router = APIRouter(prefix="/api/v1", tags=["industry-platform"])
@@ -214,3 +227,129 @@ def asset_risk(asset_id: str, hazard: str, hazard_value: float | None = None, ex
 @router.post("/scenarios")
 def create_scenario(scenario_id: str, name: str, horizon_year: int | None = None, climate_scenario: str | None = None, precipitation_delta_pct: float = 0, temperature_delta_c: float = 0, sea_level_rise_m: float = 0) -> dict[str, Any]:
     return build_scenario(scenario_id=scenario_id, name=name, horizon_year=horizon_year, climate_scenario=climate_scenario, precipitation_delta_pct=precipitation_delta_pct, temperature_delta_c=temperature_delta_c, sea_level_rise_m=sea_level_rise_m)
+
+
+# -------------------- SIMULATION JOBS --------------------
+@router.post("/simulation/jobs")
+def create_simulation_job(
+    simulation_type: str,
+    parameters: dict[str, Any],
+    spatial_type: str = "basin",
+    spatial_id: str = "mahanadi_delta_sub_1",
+    request: Request = None,
+) -> dict[str, Any]:
+    """Submit a simulation job for async execution.
+
+    simulation_type: "scenario_sensitivity" | "gr4j_hydro" | "flood_hecras"
+    """
+    # In production, extract user identity from auth
+    requested_by = getattr(request.state, "user_id", None) if request and hasattr(request, "state") else None
+
+    spatial_scope = {"type": spatial_type, "id": spatial_id}
+    job_id = submit_simulation_job(
+        simulation_type=simulation_type,
+        parameters=parameters,
+        spatial_scope=spatial_scope,
+        requested_by=requested_by,
+    )
+    return {
+        "job_id": job_id,
+        "status": JOB_STATUS_PENDING,
+        "simulation_type": simulation_type,
+        "spatial_scope": spatial_scope,
+        "message": "Job queued. Poll /api/v1/simulation/jobs/{job_id} for status.",
+    }
+
+
+@router.get("/simulation/jobs")
+def list_simulation_jobs(
+    status: str | None = Query(None),
+    simulation_type: str | None = Query(None),
+    limit: int = Query(100, ge=1, le=500),
+) -> dict[str, Any]:
+    """List simulation jobs with optional filters."""
+    jobs = list_jobs(status=status, simulation_type=simulation_type, limit=limit)
+    return {"count": len(jobs), "jobs": jobs}
+
+
+@router.get("/simulation/jobs/{job_id}")
+def get_simulation_job(job_id: str) -> dict[str, Any]:
+    """Get simulation job status and metadata."""
+    job = get_job_status(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return job
+
+
+@router.get("/simulation/jobs/{job_id}/result")
+def get_simulation_job_result(job_id: str) -> dict[str, Any]:
+    """Get simulation job result (only available when completed)."""
+    job = get_job_status(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job["status"] != JOB_STATUS_COMPLETED:
+        raise HTTPException(status_code=409, detail=f"Job not completed (status: {job['status']})")
+    result = get_job_result(job_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Result not available")
+    return result
+
+
+@router.post("/simulation/jobs/{job_id}/cancel")
+def cancel_simulation_job(job_id: str) -> dict[str, Any]:
+    """Cancel a pending or running simulation job."""
+    if not cancel_job(job_id):
+        raise HTTPException(status_code=409, detail="Job cannot be cancelled (not found or already terminal)")
+    return {"job_id": job_id, "status": JOB_STATUS_CANCELLED, "message": "Job cancelled"}
+
+
+@router.post("/simulation/jobs/{job_id}/flood-result")
+def ingest_flood_result(job_id: str, result: dict[str, Any], request: Request) -> dict[str, Any]:
+    """Ingest HEC-RAS flood model results for a previously submitted flood job.
+
+    Requires operator authentication.
+    """
+    require_operator(request)
+
+    job = get_job_status(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job["simulation_type"] != "flood_hecras":
+        raise HTTPException(status_code=400, detail="Job is not a flood_hecras simulation")
+
+    # Store the result
+    from backend.services.simulation_jobs import _load_job_meta, _save_job_meta
+    meta = _load_job_meta(job_id)
+    meta["status"] = JOB_STATUS_COMPLETED
+    meta["completed_at"] = datetime.now(timezone.utc).isoformat()
+    meta["result"] = {
+        "simulation_type": "flood_hecras",
+        "status": "completed_with_external_results",
+        "flood_output": result,
+        "scientific_status": "validated" if result.get("validated") else "unvalidated",
+    }
+    _save_job_meta(job_id, meta)
+
+    return {"job_id": job_id, "status": JOB_STATUS_COMPLETED, "message": "Flood results ingested"}
+
+
+@router.post("/gr4j/run")
+def run_gr4j_sync(
+    basin_id: str,
+    start_date: str,
+    end_date: str,
+    parameters: dict[str, float] | None = None,
+    rainfall_source: str = "imd_rf25",
+) -> dict[str, Any]:
+    """Run GR4J synchronously (for quick tests/small basins).
+
+    For production use, prefer async job submission via /api/v1/simulation/jobs
+    """
+    result = run_gr4j_simulation(
+        basin_id=basin_id,
+        start_date=start_date,
+        end_date=end_date,
+        rainfall_source=rainfall_source,
+        parameters=parameters,
+    )
+    return result
