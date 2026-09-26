@@ -208,6 +208,8 @@ def run_simulation_task(self, job_id: str) -> dict[str, Any]:
             result = _run_gr4j_hydro(job_id, parameters, spatial_scope)
         elif simulation_type == "flood_hecras":
             result = _run_flood_hecras(job_id, parameters, spatial_scope)
+        elif simulation_type == "hydro_hydraulic_coupled":
+            result = _run_hydro_hydraulic_coupled(job_id, parameters, spatial_scope)
         else:
             raise ValueError(f"Unknown simulation type: {simulation_type}")
 
@@ -352,6 +354,79 @@ def _run_flood_hecras(job_id: str, parameters: dict[str, Any], spatial_scope: di
         "manifest": manifest,
         "note": "HEC-RAS model must be executed externally. Results can be ingested via /api/v1/simulation/jobs/{job_id}/flood-result",
         "scientific_status": "manifest_only",
+    }
+
+
+def _run_hydro_hydraulic_coupled(job_id: str, parameters: dict[str, Any], spatial_scope: dict[str, str]) -> dict[str, Any]:
+    """Run full GR4J → HEC-RAS coupled simulation.
+    
+    1. Run GR4J rainfall-runoff to get discharge time series
+    2. Convert to HEC-RAS boundary conditions
+    3. Build complete manifest for external HEC-RAS execution
+    """
+    from backend.services.gr4j_model import run_gr4j_simulation
+    from backend.services.flood_twin_service import build_full_hydro_hydraulic_manifest
+
+    meta = _load_job_meta(job_id)
+    meta["current_step"] = "running_gr4j"
+    meta["progress"] = 20
+    _save_job_meta(job_id, meta)
+
+    # Extract parameters
+    basin_id = spatial_scope.get("id", "mahanadi_delta_sub_1")
+    start_date = parameters.get("start_date")
+    end_date = parameters.get("end_date")
+    rainfall_source = parameters.get("rainfall_source", "imd_rf25")
+    scenario_id = parameters.get("scenario_id", f"hydro_hydro_{job_id[:8]}")
+
+    if not start_date or not end_date:
+        raise ValueError("start_date and end_date required for coupled simulation")
+
+    # Step 1: Run GR4J
+    gr4j_result = run_gr4j_simulation(
+        basin_id=basin_id,
+        start_date=start_date,
+        end_date=end_date,
+        rainfall_source=rainfall_source,
+        parameters=parameters.get("gr4j_params"),
+    )
+
+    meta["current_step"] = "building_hecras_manifest"
+    meta["progress"] = 50
+    _save_job_meta(job_id, meta)
+
+    # Step 2: Build full hydro-hydraulic manifest
+    full_manifest = build_full_hydro_hydraulic_manifest(
+        gr4j_result=gr4j_result,
+        basin_id=basin_id,
+        scenario_id=scenario_id,
+        terrain_asset_uri=parameters.get("terrain_asset_uri", 
+            "backend/data/basins/mahanadi_delta/dem_copernicus_30m.nc"),
+        river_centerline_path=parameters.get("river_centerline_path",
+            "backend/data/basins/mahanadi_delta/hydrorivers_mahanadi.shp"),
+        cross_sections_path=parameters.get("cross_sections_path"),
+        landcover_asset_uri=parameters.get("landcover_asset_uri",
+            "backend/data/basins/mahanadi_delta/worldcover_10m.nc"),
+        downstream_bc_type=parameters.get("downstream_bc_type", "normal_depth"),
+        downstream_bc_value=parameters.get("downstream_bc_value"),
+    )
+
+    meta["current_step"] = "manifest_ready"
+    meta["progress"] = 90
+    _save_job_meta(job_id, meta)
+
+    return {
+        "simulation_type": "hydro_hydraulic_coupled",
+        "scenario_id": scenario_id,
+        "basin_id": basin_id,
+        "period": {"start": start_date, "end": end_date},
+        "gr4j_result": gr4j_result,
+        "full_manifest": full_manifest,
+        "model": "GR4J → HEC-RAS-2D",
+        "model_version": "1.0.0",
+        "parameters_used": parameters.get("gr4j_params"),
+        "scientific_status": "manifest_generated_for_external_hecras",
+        "note": "GR4J completed. HEC-RAS must be executed externally using the provided manifest. Ingest results via /api/v1/simulation/jobs/{job_id}/flood-result",
     }
 
 

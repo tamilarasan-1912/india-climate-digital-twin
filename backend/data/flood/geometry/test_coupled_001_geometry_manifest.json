@@ -1,0 +1,7 @@
+{
+  "scenario_id": "test_coupled_001",
+  "basin_id": "mahanadi_delta_sub_1",
+  "river_centerline": "backend/data/basins/mahanadi_delta/hydrorivers_mahanadi.shp",
+  "cross_sections": null,
+  "generated_at": "2026-09-26T17:40:32.682188+00:00"
+}

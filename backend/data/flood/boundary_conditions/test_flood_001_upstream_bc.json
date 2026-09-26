@@ -1,0 +1,51 @@
+{
+  "scenario_id": "test_flood_001",
+  "basin_id": "mahanadi_delta_sub_1",
+  "source": "GR4J",
+  "generated_at": "2026-09-26T17:37:41.020539+00:00",
+  "variables": [
+    "discharge_m3s"
+  ],
+  "timeseries": [
+    {
+      "date": "2024-07-01",
+      "discharge_m3s": 481.19902185395773
+    },
+    {
+      "date": "2024-07-02",
+      "discharge_m3s": 451.6943893799063
+    },
+    {
+      "date": "2024-07-03",
+      "discharge_m3s": 450.4954938562542
+    },
+    {
+      "date": "2024-07-04",
+      "discharge_m3s": 601.57771015615
+    },
+    {
+      "date": "2024-07-05",
+      "discharge_m3s": 517.9980891631185
+    },
+    {
+      "date": "2024-07-06",
+      "discharge_m3s": 438.15405662151676
+    },
+    {
+      "date": "2024-07-07",
+      "discharge_m3s": 290.87729459858093
+    },
+    {
+      "date": "2024-07-08",
+      "discharge_m3s": 313.6739041097322
+    },
+    {
+      "date": "2024-07-09",
+      "discharge_m3s": 250.47910185624667
+    },
+    {
+      "date": "2024-07-10",
+      "discharge_m3s": 195.94949348580153
+    }
+  ]
+}
