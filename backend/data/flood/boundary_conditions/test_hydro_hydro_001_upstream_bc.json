@@ -1,0 +1,51 @@
+{
+  "scenario_id": "test_hydro_hydro_001",
+  "basin_id": "mahanadi_delta_sub_1",
+  "source": "GR4J",
+  "generated_at": "2026-09-26T18:20:31.476110+00:00",
+  "variables": [
+    "discharge_m3s"
+  ],
+  "timeseries": [
+    {
+      "date": "2024-07-01",
+      "discharge_m3s": 587.7012343222877
+    },
+    {
+      "date": "2024-07-02",
+      "discharge_m3s": 562.4008013389355
+    },
+    {
+      "date": "2024-07-03",
+      "discharge_m3s": 572.2838698473815
+    },
+    {
+      "date": "2024-07-04",
+      "discharge_m3s": 768.3956060879132
+    },
+    {
+      "date": "2024-07-05",
+      "discharge_m3s": 670.8233676684316
+    },
+    {
+      "date": "2024-07-06",
+      "discharge_m3s": 574.8988276408512
+    },
+    {
+      "date": "2024-07-07",
+      "discharge_m3s": 369.41629604323947
+    },
+    {
+      "date": "2024-07-08",
+      "discharge_m3s": 415.5037928416283
+    },
+    {
+      "date": "2024-07-09",
+      "discharge_m3s": 336.98884421754167
+    },
+    {
+      "date": "2024-07-10",
+      "discharge_m3s": 253.54370413465725
+    }
+  ]
+}
