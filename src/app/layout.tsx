@@ -21,7 +21,7 @@ export const metadata: Metadata = {
   description: "Chronological climate intelligence for India: observations, risk and forecasts.",
 };
 
-export default function RootLayout({ children }: LayoutProps<"/">) {
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html
       lang="en"
