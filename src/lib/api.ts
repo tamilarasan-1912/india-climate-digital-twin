@@ -161,6 +161,22 @@ export type ScenarioPayload = {
   unmodeled_parameters?: string[];
   warning?: string;
   scientific_status?: string;
+  
+  // New hydro-hydraulic scenario fields
+  hydro_scenario?: {
+    basin_id?: string;
+    period?: { start: string; end: string };
+    parameters?: { precipitation_multiplier?: number; temperature_delta_c?: number; gr4j_params?: Record<string, number> };
+    baseline?: { mean_discharge_m3s?: number; peak_discharge_m3s?: number; total_volume_m3?: number };
+    scenario?: { mean_discharge_m3s?: number; peak_discharge_m3s?: number; total_volume_m3?: number };
+    change?: { mean_discharge_pct?: number; peak_discharge_pct?: number; volume_pct?: number };
+    coupling?: { precipitation?: string; temperature?: string; note?: string };
+    model?: { name?: string; version?: string; parameters?: Record<string, number> };
+    provenance?: Record<string, unknown>;
+    scientific_status?: string;
+    limitations?: string[];
+  };
+  hydraulic_manifest?: Record<string, unknown>;
 };
 
 export type AssistantPayload = {
@@ -242,6 +258,183 @@ export type HistoricalPayload = {
   series?: { date: string; rainfall_mm?: number; value?: number }[];
 };
 
+export type SimulationJobPayload = {
+  job_id: string;
+  status: "pending" | "running" | "completed" | "failed" | "cancelled";
+  simulation_type: string;
+  spatial_scope?: { type: string; id: string };
+  created_at: string;
+  started_at?: string | null;
+  completed_at?: string | null;
+  progress?: number;
+  current_step?: string;
+  result?: Record<string, unknown>;
+  error?: string;
+};
+
+export type FloodRiskAssetDamagePayload = {
+  asset_id: string;
+  asset_type: string;
+  flood_depth_m: number;
+  velocity_mps?: number;
+  duration_hours?: number;
+  replacement_value_inr: number;
+  content_value_inr: number;
+  structural_damage_fraction: number;
+  content_damage_fraction: number;
+  structural_damage_inr: number;
+  content_damage_inr: number;
+  total_damage_inr: number;
+  damage_ratio: number;
+  curve_source: string;
+  scientific_status: string;
+  limitations: string[];
+};
+
+export type FloodRiskPopulationExposurePayload = {
+  total_population: number;
+  exposed_population: number;
+  exposure_fraction: number;
+  depth_distribution: Record<string, number>;
+  velocity_distribution: Record<string, number>;
+  scientific_status: string;
+  limitations: string[];
+};
+
+export type FloodRiskGridPayload = {
+  risk_grid: number[];
+  statistics: {
+    mean_risk: number;
+    max_risk: number;
+    risk_area_m2: number;
+    high_risk_cells: number;
+    moderate_risk_cells: number;
+    low_risk_cells: number;
+  };
+  hazard_summary: {
+    mean_depth_m: number;
+    max_depth_m: number;
+    flooded_area_m2: number;
+  };
+  exposure_summary: {
+    total_exposure: number;
+    exposed_exposure: number;
+  };
+  scientific_status: string;
+  limitations: string[];
+};
+
+export type FloodRiskAssetRecordPayload = {
+  asset_id: string;
+  location_id: string;
+  hazard: string;
+  hazard_value: number;
+  exposure_value: number;
+  vulnerability_value: number;
+  risk_score: number | null;
+  risk_status: string;
+  confidence: number;
+  model_version: string;
+  assessment_time: string;
+  units: string;
+  data_quality_score?: number;
+  validation_status: string;
+  limitations: string[];
+  flood_specific: {
+    flood_depth_m: number;
+    velocity_mps?: number;
+    duration_hours?: number;
+    asset_type: string;
+    structural_damage_inr: number;
+    content_damage_inr: number;
+    total_damage_inr: number;
+    damage_fraction: number;
+    population_exposed?: number;
+    expected_annual_loss_inr?: number;
+  };
+};
+
+export type ValidationMetricsPayload = {
+  nse: number | null;
+  kge: number | null;
+  rmse: number | null;
+  mae: number | null;
+  pbias: number | null;
+  rsr: number | null;
+  log_nse: number | null;
+  correlation: number | null;
+  volume_error_pct: number | null;
+  peak_flow: {
+    magnitude_error_pct: number | null;
+    timing_error_days: number | null;
+    peak_observed: number | null;
+    peak_simulated: number | null;
+  };
+  low_flow_error_pct: number | null;
+  high_flow_error_pct: number | null;
+  n_observations: number;
+};
+
+export type ParameterUncertaintyPayload = {
+  n_successful: number;
+  n_failed: number;
+  ensemble_mean: number[];
+  ensemble_std: number[];
+  ensemble_5th: number[];
+  ensemble_95th: number[];
+  ensemble_25th: number[];
+  ensemble_75th: number[];
+  metric_statistics: Record<string, {
+    mean: number;
+    std: number;
+    min: number;
+    max: number;
+    median: number;
+  }>;
+  coverage_90: { lower: number[]; upper: number[] };
+  coverage_50: { lower: number[]; upper: number[] };
+  scientific_status: string;
+};
+
+export type CrossValidationPayload = {
+  n_folds: number;
+  fold_results: Array<{
+    fold: number;
+    train_period: string;
+    test_period: string;
+    best_train_nse: number;
+    test_metrics: ValidationMetricsPayload;
+    best_params: Record<string, number>;
+  }>;
+  aggregate: {
+    mean_test_nse: number | null;
+    std_test_nse: number | null;
+    mean_test_kge: number | null;
+    std_test_kge: number | null;
+  };
+  scientific_status: string;
+};
+
+export type ForecastVerificationPayload = {
+  deterministic: ValidationMetricsPayload;
+  reliability: string;
+  sharpness: string;
+  roc_auc: string;
+  scientific_status: string;
+};
+
+export type ValidationMetricsCatalogPayload = {
+  metrics: Record<string, {
+    name: string;
+    range: string;
+    perfect: string | number;
+    interpretation: string;
+    recommended_threshold?: string;
+  }>;
+  peak_flow_metrics: Record<string, string>;
+  flow_percentile_metrics: Record<string, string>;
+};
+
 /** Every endpoint the console reads, as path builders so dates stay in one place. */
 export const endpoints = {
   health: () => "/api/health",
@@ -274,4 +467,30 @@ export const endpoints = {
   whatIf: (params: URLSearchParams) => `/api/twin/what-if?${params}`,
   intelligence: (question: string, date: string, layer: string) =>
     `/api/climate/intelligence?${new URLSearchParams({ question, date, layer })}`,
+  
+  // Simulation jobs
+  simulationJobs: () => "/api/v1/simulation/jobs",
+  simulationJob: (jobId: string) => `/api/v1/simulation/jobs/${jobId}`,
+  simulationJobResult: (jobId: string) => `/api/v1/simulation/jobs/${jobId}/result`,
+  cancelSimulationJob: (jobId: string) => `/api/v1/simulation/jobs/${jobId}/cancel`,
+  
+  // Flood risk
+  floodDepthDamageCurves: () => "/api/v1/flood/risk/depth-damage-curves",
+  floodAssetDamage: () => "/api/v1/flood/risk/asset-damage",
+  floodPopulationExposure: () => "/api/v1/flood/risk/population-exposure",
+  floodExpectedAnnualDamage: () => "/api/v1/flood/risk/expected-annual-damage",
+  floodRiskGrid: () => "/api/v1/flood/risk/grid",
+  floodAssetRiskRecord: () => "/api/v1/flood/risk/asset-record",
+  
+  // Validation & uncertainty
+  validationHydrological: () => "/api/v1/validation/hydrological",
+  validationParameterUncertainty: () => "/api/v1/validation/parameter-uncertainty",
+  validationCrossValidation: () => "/api/v1/validation/cross-validation",
+  validationForecastVerification: () => "/api/v1/validation/forecast-verification",
+  validationMetricsCatalog: () => "/api/v1/validation/metrics-catalog",
+  
+  // Hydro scenarios
+  hydroScenario: () => "/api/v1/scenarios/hydro",
+  hydroHydraulicScenario: () => "/api/v1/scenarios/hydro-hydraulic",
+  compareScenarios: () => "/api/v1/scenarios/compare",
 };

@@ -7,6 +7,7 @@ import LocationBreadcrumb from "../components/LocationBreadcrumb";
 import TemporalModeIndicator from "../components/TemporalModeIndicator";
 import TemporalTimeline from "../components/TemporalTimeline";
 import { DataStatus, NoData, ProvenanceBadge } from "../components/DataStatus";
+import { SimulationPanel, FloodRiskPanel, ValidationPanel } from "@/components/SimulationPanel";
 import {
   describeFailure,
   endpoints,
@@ -30,6 +31,11 @@ import {
   type StateTwinPayload,
   type SystemStatusPayload,
   type ValidationPayload,
+  type SimulationJobPayload,
+  type FloodRiskAssetDamagePayload,
+  type ValidationMetricsPayload,
+  type ParameterUncertaintyPayload,
+  type ValidationMetricsCatalogPayload,
 } from "@/lib/api";
 import {
   MODE_LABEL,
@@ -62,6 +68,7 @@ const NAV: { group: string; items: { label: string; hint: string }[] }[] = [
       { label: "Districts", hint: "District aggregation" },
       { label: "Risk", hint: "Hazard and risk engine" },
       { label: "Extreme Events", hint: "Detected extremes" },
+      { label: "Flood Risk", hint: "Depth-damage & asset-level" },
     ],
   },
   {
@@ -69,12 +76,13 @@ const NAV: { group: string; items: { label: string; hint: string }[] }[] = [
     items: [
       { label: "Forecast", hint: "Model output" },
       { label: "What-If", hint: "Sensitivity experiment" },
+      { label: "Simulation", hint: "Async job execution" },
     ],
   },
   {
     group: "TRUST",
     items: [
-      { label: "Validation", hint: "Model skill" },
+      { label: "Validation", hint: "Model skill & uncertainty" },
       { label: "Provenance", hint: "Data lineage" },
       { label: "Assistant", hint: "Climate intelligence" },
       { label: "System", hint: "Capability contract" },
@@ -760,7 +768,7 @@ export default function ConsolePage() {
         </div>
       </div>
     );
-  } else if (nav === "Forecast") {
+} else if (nav === "Forecast") {
     body = (
       <div className="two">
         {forecastPanel}
@@ -780,17 +788,22 @@ export default function ConsolePage() {
         </section>
       </div>
     );
+  } else if (nav === "Simulation") {
+    body = (
+      <div className="single">
+        <SimulationPanel/>
+      </div>
+    );
+  } else if (nav === "Flood Risk") {
+    body = (
+      <div className="single">
+        <FloodRiskPanel/>
+      </div>
+    );
   } else if (nav === "Validation") {
     body = (
-      <div className="two">
-        <section className="panel">
-          <header className="panel-head"><h2>MODEL &amp; DATA VALIDATION</h2></header>
-          <Json data={data.validation}/>
-        </section>
-        <section className="panel">
-          <header className="panel-head"><h2>MODEL REGISTRY</h2></header>
-          <Json data={data.models}/>
-        </section>
+      <div className="single">
+        <ValidationPanel/>
       </div>
     );
   } else if (nav === "Provenance") {
